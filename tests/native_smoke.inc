@@ -102,6 +102,12 @@ static void smoke(void) {
         check(fabs(NSMidX(start)-NSMidX(screen)) <= 1 && fabs(NSMidY(start)-NSMidY(screen)) <= 1, "startup centre");
         check(app.pill.visible && app.pill.parentWindow == app.window, "visible child toolbar");
         NSView *controls = app.pill.contentView;
+        [app.pillAddress performClick:nil];
+        NSTextView *addressEditor = (NSTextView *)app.pillEditor.currentEditor;
+        check(addressEditor && !app.pillEditor.hidden, "address edits in pill");
+        [addressEditor insertText:@"https://example.org/demo" replacementRange:NSMakeRange(0, addressEditor.string.length)];
+        [addressEditor doCommandBySelector:@selector(cancelOperation:)];
+        check(app.pillEditor.hidden && !app.pillAddress.hidden, "Escape cancels inline editing");
         NSButton *geometry = prefsButton(controls, @selector(quickGeometry:), NSNotFound);
         check(geometry.image != nil, "geometry button");
         [geometry performClick:nil];

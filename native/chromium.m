@@ -27,6 +27,23 @@ static cef_base_ref_counted_t permanent(size_t size) {
 }
 static cef_browser_process_handler_t *get_process(cef_app_t *s) { return &process; }
 static cef_life_span_handler_t *get_life(cef_client_t *s) { return &life; }
+static cef_display_handler_t display;
+static cef_load_handler_t load;
+static cef_display_handler_t *get_display(cef_client_t *s) { return &display; }
+static cef_load_handler_t *get_load(cef_client_t *s) { return &load; }
+static void notifyNavigation(void) {
+    afterEvent(^{ [NSNotificationCenter.defaultCenter postNotificationName:BrowNavigationChanged object:nil]; });
+}
+static void addressChanged(cef_display_handler_t *s, cef_browser_t *browser, cef_frame_t *frame,
+                           const cef_string_t *url) {
+    if (frame->is_main(frame)) notifyNavigation();
+    DROP(frame);
+    DROP(browser);
+}
+static void loadingChanged(cef_load_handler_t *s, cef_browser_t *browser, int loading, int back, int forward) {
+    notifyNavigation();
+    DROP(browser);
+}
 static int popup(cef_life_span_handler_t *s, cef_browser_t *browser, cef_frame_t *frame, int popupID,
                  const cef_string_t *url, const cef_string_t *name, cef_window_open_disposition_t disposition,
                  int gesture, const cef_popup_features_t *features, cef_window_info_t *window,
@@ -107,6 +124,12 @@ static bool start(void) {
     life.on_after_created = created;
     life.on_before_close = closed;
     client.base = permanent(sizeof(client));
+    display.base = permanent(sizeof(display));
+    display.on_address_change = addressChanged;
+    load.base = permanent(sizeof(load));
+    load.on_loading_state_change = loadingChanged;
+    client.get_display_handler = get_display;
+    client.get_load_handler = get_load;
     client.get_life_span_handler = get_life;
     cef_main_args_t args = {*_NSGetArgc(), *_NSGetArgv()};
     cef_settings_t settings = {0};
@@ -207,6 +230,8 @@ static void captureResult(cef_dev_tools_message_observer_t *observer, cef_browse
     cef_string_clear(&address);
     DROP(frame);
 }
+- (BOOL)canGoBack { return self.browser && self.browser->can_go_back(self.browser); }
+- (BOOL)canGoForward { return self.browser && self.browser->can_go_forward(self.browser); }
 - (void)goBack {
     self.browser->go_back(self.browser);
 }

@@ -1,9 +1,10 @@
 // A child panel keeps the controls outside the page's layout and hit-test area.
 - (void)buildPill {
-    NSRect bounds = NSMakeRect(0, 0, 354, 42);
-    self.pill = [[NSPanel alloc] initWithContentRect:bounds
+    NSRect bounds = NSMakeRect(0, 0, 626, 42);
+    self.pill = [[PillPanel alloc] initWithContentRect:bounds
         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
         backing:NSBackingStoreBuffered defer:NO];
+    self.pill.becomesKeyOnlyIfNeeded = YES;
     self.pill.title = @"Window toolbar";
     self.pill.releasedWhenClosed = NO;
     self.pill.opaque = NO;
@@ -29,6 +30,10 @@
     }
 
     NSArray *commands = @[
+        @[@"Back", @"chevron.left", @"back:"],
+        @[@"Forward", @"chevron.right", @"forward:"],
+        @[@"Reload", @"arrow.clockwise", @"refresh:"],
+        @[@"Edit address", @"magnifyingglass", @"editPillAddress:"],
         @[@"Settings", @"gearshape", @"settings:"],
         @[@"Window Settings", @"macwindow", @"windowSettings:"],
         @[@"Window size and position", @"slider.horizontal.3", @"quickGeometry:"],
@@ -41,7 +46,7 @@
     ];
     CGFloat x = 8;
     for (NSUInteger i = 0; i < commands.count; i++) {
-        if (i == 3 || i == 7) {
+        if (i == 4 || i == 7 || i == 11) {
             NSBox *divider = [[NSBox alloc] initWithFrame:NSMakeRect(x + 3, 13, 1, 16)];
             divider.boxType = NSBoxSeparator;
             [controls addSubview:divider];
@@ -58,6 +63,16 @@
             owner:self userInfo:@{@"button":[NSValue valueWithNonretainedObject:button]}]];
         button.accessibilityLabel = command[0];
         button.frame = NSMakeRect(x, 5, 32, 32);
+        if (action == @selector(back:)) self.pillBack = button;
+        if (action == @selector(forward:)) self.pillForward = button;
+        if (action == @selector(refresh:)) self.pillReload = button;
+        if (action == @selector(editPillAddress:)) {
+            self.pillAddress = button;
+            button.frame = NSMakeRect(x, 5, 168, 32);
+            button.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+            button.imagePosition = NSImageLeft;
+            button.lineBreakMode = NSLineBreakByTruncatingTail;
+        }
         if (action == @selector(togglePill:)) {
             button.title = @"⌘\\";
             button.imagePosition = NSImageLeft;
@@ -68,7 +83,45 @@
         [controls addSubview:button];
         x += NSWidth(button.frame);
     }
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(pillResignedKey:) name:NSWindowDidResignKeyNotification object:self.pill];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncPillNavigation:) name:BrowNavigationChanged object:nil];
     if (![NSUserDefaults.standardUserDefaults boolForKey:@"toolbarHidden"]) [self attachPill];
+}
+- (void)editPillAddress:(id)sender {
+    [self dismiss];
+    if (!self.pillEditor) {
+        self.pillEditor = [[NSTextField alloc] initWithFrame:NSInsetRect(self.pillAddress.frame, 1, 4)];
+        self.pillEditor.placeholderString = @"Search or enter URL";
+        self.pillEditor.accessibilityLabel = @"Address";
+        self.pillEditor.bezelStyle = NSTextFieldRoundedBezel;
+        self.pillEditor.delegate = self;
+        [self.pillControls addSubview:self.pillEditor];
+    }
+    self.pillAddress.hidden = YES;
+    self.pillEditor.hidden = NO;
+    self.pillEditor.stringValue = page().address ?: @"";
+    [self.pill makeKeyWindow];
+    [self.pillEditor selectText:nil];
+}
+- (void)pillResignedKey:(NSNotification *)note { [self endPillEditing]; }
+- (void)endPillEditing {
+    self.pillEditor.hidden = YES;
+    self.pillAddress.hidden = NO;
+}
+- (void)syncPillNavigation:(NSNotification *)note {
+    if (self.quitting) return;
+    NSView<BrowPage> *current = page();
+    if (note.object && note.object != current) return;
+    NSString *address = current.address;
+    NSURL *url = address.length ? [NSURL URLWithString:address] : nil;
+    NSString *label = url.host;
+    if (label.length && url.port) label = [label stringByAppendingFormat:@":%@", url.port];
+    if (!label.length) label = url.isFileURL ? url.lastPathComponent : nil;
+    BOOL blank = !address.length || [address isEqual:@"about:blank"];
+    self.pillAddress.title = label.length ? label : (blank ? @"Search or enter URL" : @"Page address");
+    self.pillBack.enabled = current.canGoBack;
+    self.pillForward.enabled = current.canGoForward;
+    self.pillReload.enabled = !blank;
 }
 - (void)mouseEntered:(NSEvent *)event {
     NSButton *button = (NSButton *)[event.trackingArea.userInfo[@"button"] nonretainedObjectValue];
@@ -94,7 +147,7 @@
 }
 - (void)showPillTip:(NSButton *)button {
     if (button != self.tipAnchor || !self.pill.visible || !NSApp.active || self.toolPopover.shown) return;
-    NSDictionary *keys = @{@"settings:": @"⌘,", @"toggleFocus:": @"⇧⌘F", @"fillWindow:": @"⌥⌘F",
+    NSDictionary *keys = @{@"back:": @"⌘[", @"forward:": @"⌘]", @"refresh:": @"⌘R", @"settings:": @"⌘,", @"toggleFocus:": @"⇧⌘F", @"fillWindow:": @"⌥⌘F",
         @"toggleFullScreen:": @"⌃⌘F", @"centreWindow:": @"⌥⌘C", @"togglePill:": @"⌘\\"};
     NSView *body = [NSView new];
     body.wantsLayer = YES;
@@ -164,6 +217,7 @@
     BOOL hide = self.pill.parentWindow != nil;
     [NSUserDefaults.standardUserDefaults setBool:hide forKey:@"toolbarHidden"];
     if (hide) {
+        [self endPillEditing];
         [self hidePillTip];
         [self.toolPopover close];
         [self.window removeChildWindow:self.pill];

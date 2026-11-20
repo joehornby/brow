@@ -61,7 +61,13 @@ static void openLink(NSString *url, bool chromium);
 
 @interface WebPage : WKWebView <BrowPage, WKUIDelegate>
 @end
+static char webNavigationContext;
 @implementation WebPage
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (context == &webNavigationContext)
+        [NSNotificationCenter.defaultCenter postNotificationName:BrowNavigationChanged object:self];
+    else [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
 - (NSString *)address {
     return self.URL.absoluteString ?: @"";
 }
@@ -86,6 +92,8 @@ static void openLink(NSString *url, bool chromium);
     [self.window makeFirstResponder:self];
 }
 - (void)dispose {
+    for (NSString *key in @[@"URL", @"canGoBack", @"canGoForward"])
+        [self removeObserver:self forKeyPath:key context:&webNavigationContext];
     [self stopLoading];
 }
 - (WKWebView *)webView:(WKWebView *)view
@@ -103,6 +111,12 @@ static void openLink(NSString *url, bool chromium);
 @implementation BrowWindow
 - (BOOL)canBecomeKeyWindow { return YES; }
 - (BOOL)canBecomeMainWindow { return YES; }
+@end
+
+@interface PillPanel : NSPanel
+@end
+@implementation PillPanel
+- (BOOL)canBecomeKeyWindow { return YES; }
 @end
 
 @interface Surface : NSView
@@ -134,6 +148,8 @@ static void openLink(NSString *url, bool chromium);
 @property CFTimeInterval lastTipTime;
 - (void)hidePillTip;
 @property NSView *pillControls;
+@property NSTextField *pillEditor;
+@property NSButton *pillAddress, *pillBack, *pillForward, *pillReload;
 @property NSPopover *toolPopover;
 @property NSButton *popoverAnchor;
 @property NSArray<NSTextField *> *quickFields;
@@ -453,6 +469,7 @@ static NSString *selectedIcon(void) {
     [page() refresh];
 }
 - (void)palette:(id)sender {
+    if (self.pill.isKeyWindow) [self.window makeKeyWindow];
     if (self.overlay) {
         [self.field selectText:nil];
         return;
@@ -661,12 +678,14 @@ static NSString *selectedIcon(void) {
         [self dismiss];
 }
 - (void)controlTextDidEndEditing:(NSNotification *)note {
+    if (note.object == self.pillEditor) { [self endPillEditing]; return; }
     if ([self.geometryFields containsObject:note.object] || [self.quickFields containsObject:note.object]) {
         // AppKit detaches the shared field editor after notifying the delegate.
         dispatch_async(dispatch_get_main_queue(), ^{ [self syncGeometryFields]; });
     }
 }
 - (void)controlTextDidChange:(NSNotification *)note {
+    if (note.object == self.pillEditor) return;
     if ([self.geometryFields containsObject:note.object] || [self.quickFields containsObject:note.object]) {
         [self applyFields:[self.quickFields containsObject:note.object] ? self.quickFields : self.geometryFields centre:NO];
         return;
@@ -675,6 +694,21 @@ static NSString *selectedIcon(void) {
     [self filter:self.field.stringValue];
 }
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)editor doCommandBySelector:(SEL)sel {
+    if (control == self.pillEditor) {
+        if (sel != @selector(insertNewline:) && sel != @selector(cancelOperation:)) return NO;
+        NSString *input = editor.string.copy;
+        [self.window makeKeyAndOrderFront:nil];
+        [self endPillEditing];
+        [self dismiss];
+        if (sel == @selector(insertNewline:) && input.length) {
+            char *destination = brow_destination(input.UTF8String);
+            if (destination) {
+                [page() navigate:@(destination)];
+                brow_free(destination);
+            }
+        }
+        return YES;
+    }
     NSArray *fields = [self.quickFields containsObject:(NSTextField *)control] ? self.quickFields : self.geometryFields;
     if ([fields containsObject:control]) {
         if (sel == @selector(insertTab:) || sel == @selector(insertBacktab:)) {
@@ -754,6 +788,8 @@ bool host_create(uint64_t ident, bool useChromium) {
         if (version.length)
             config.applicationNameForUserAgent = [NSString stringWithFormat:@"Version/%@ Safari/605.1.15", version];
         WebPage *wk = [[WebPage alloc] initWithFrame:app.deck.bounds configuration:config];
+        for (NSString *key in @[@"URL", @"canGoBack", @"canGoForward"])
+            [wk addObserver:wk forKeyPath:key options:0 context:&webNavigationContext];
         wk.UIDelegate = wk;
         wk.allowsBackForwardNavigationGestures = YES;
         p = wk;
@@ -789,6 +825,7 @@ static CATransform3D depth(NSView *surface, CGFloat scale) {
 }
 
 void host_present(uint64_t ident, uint64_t previous, int direction) {
+    if (app.pill.isKeyWindow) [app.window makeKeyWindow];
     NSUInteger ticket = ++app.generation;
     NSView *incoming = app.pages[@(ident)].superview, *outgoing = app.pages[@(previous)].superview;
     BOOL reduced = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
@@ -838,6 +875,7 @@ void host_present(uint64_t ident, uint64_t previous, int direction) {
               relativeTo:nil];
     [CATransaction commit];
     [app.pages[@(ident)] focus];
+    [app syncPillNavigation:nil];
     if (app.focusMode) [app refreshBackdrop];
     if (motion)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 290 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
