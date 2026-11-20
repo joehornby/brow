@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+case "$(uname -m)" in
+  arm64) platform=macosarm64; checksum=1bd39ff38db20baa5b52768919d6599aafb4aacbc7fd192458496749a0630ee8 ;;
+  *) echo "The bundled Chromium build currently targets Apple silicon." >&2; exit 1 ;;
+esac
+name="cef_binary_156.0.31+ge603d97+chromium-156.0.8078.100_${platform}_minimal"
+mkdir -p target/vendor
+cd target/vendor
+if [[ ! -d cef ]]; then
+  curl -fL --retry 2 "https://cef-builds.spotifycdn.com/${name//+/%2B}.tar.bz2" -o cef.tar.bz2
+  echo "$checksum  cef.tar.bz2" | shasum -a 256 -c -
+  tar xjf cef.tar.bz2
+  mv "$name" cef
+fi

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="tile" x2=".35" y2="1"><stop stop-color="#111132"/><stop offset="1" stop-color="#2a0b35"/></linearGradient>
+    <linearGradient id="tube"><stop stop-color="#71e8ff"/><stop offset=".47" stop-color="#c896ff"/><stop offset="1" stop-color="#ff55aa"/></linearGradient>
+  </defs>
+  <rect x="17" y="19" width="222" height="222" rx="50" fill="#171222" opacity=".15"/>
+  <rect x="17" y="16" width="222" height="222" rx="50" fill="url(#tile)" stroke="#2a0b35" stroke-width="1.5"/>
+  <g transform="translate(40 90) scale(1.2222)">
+    <path d="M144 57.5C144 43.5 119.5 0 72 0C24.5 0 0 43.5 0 57.5C0 77 17 49.5 72 49.5C127 49.5 144 77 144 57.5Z" fill="none" stroke="#e346ed" stroke-width="13" opacity=".10"/>
+    <path d="M144 57.5C144 43.5 119.5 0 72 0C24.5 0 0 43.5 0 57.5C0 77 17 49.5 72 49.5C127 49.5 144 77 144 57.5Z" fill="#18102a" stroke="url(#tube)" stroke-width="6"/>
+    <path d="M144 57.5C144 43.5 119.5 0 72 0C24.5 0 0 43.5 0 57.5C0 77 17 49.5 72 49.5C127 49.5 144 77 144 57.5Z" fill="none" stroke="#fff1ff" stroke-width="1.7"/>
+  </g>
+</svg>

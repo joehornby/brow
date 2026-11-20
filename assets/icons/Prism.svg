@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="tile" x2=".35" y2="1"><stop stop-color="#ffefbf"/><stop offset="1" stop-color="#f2d596"/></linearGradient>
+    <clipPath id="clip"><path d="M144 57.5C144 43.5 119.5 0 72 0C24.5 0 0 43.5 0 57.5C0 77 17 49.5 72 49.5C127 49.5 144 77 144 57.5Z"/></clipPath>
+  </defs>
+  <rect x="17" y="19" width="222" height="222" rx="50" fill="#171222" opacity=".15"/>
+  <rect x="17" y="16" width="222" height="222" rx="50" fill="url(#tile)" stroke="#f2d596" stroke-width="1.5"/>
+  <g transform="translate(40 90) scale(1.2222)">
+    <path d="M144 57.5C144 43.5 119.5 0 72 0C24.5 0 0 43.5 0 57.5C0 77 17 49.5 72 49.5C127 49.5 144 77 144 57.5Z" fill="#ff9640" stroke="#fffaf0" stroke-width="7" stroke-linejoin="round"/>
+    <g clip-path="url(#clip)">
+      <path d="M-8 -8H71L28 78H-8Z" fill="#ff6558"/>
+      <path d="M28 -8H85L63 27L16 69L-5 57Z" fill="#ec4778"/>
+      <path d="M58 -5H114L77 64L42 47Z" fill="#496aef"/>
+      <path d="M100 -8H151L124 52L77 64Z" fill="#1db6a0"/>
+      <path d="M127 1L153 21V77H100Z" fill="#126a8a"/>
+    </g>
+  </g>
+</svg>

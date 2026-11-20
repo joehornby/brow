@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+cargo="${CARGO:-$(command -v cargo || echo "$HOME/.cargo/bin/cargo")}"
+scripts/fetch-cef
+app=target/Brow.app
+identifier=local.brow.browser
+if [[ "${BROW_UI_TEST:-0}" == 1 ]]; then
+  "$cargo" build --locked --release --features ui-test
+  app=target/ui-test/Brow.app
+  identifier=local.brow.uitest
+else
+  "$cargo" build --locked --release
+fi
+contents="$app/Contents"
+frameworks="$contents/Frameworks"
+cef=target/vendor/cef
+mkdir -p "$contents/MacOS" "$frameworks"
+cp target/release/brow "$contents/MacOS/Brow"
+plist() {
+  /usr/bin/plutil -create xml1 "$1"
+  /usr/bin/plutil -insert CFBundlePackageType -string APPL "$1"
+  /usr/bin/plutil -insert CFBundleIdentifier -string "$2" "$1"
+  /usr/bin/plutil -insert CFBundleExecutable -string "$3" "$1"
+  /usr/bin/plutil -insert CFBundleName -string "$3" "$1"
+  /usr/bin/plutil -insert CFBundleVersion -string 1 "$1"
+}
+plist "$contents/Info.plist" "$identifier" Brow
+ditto "$cef/Release/Chromium Embedded Framework.framework" "$frameworks/Chromium Embedded Framework.framework"
+clang -O2 -dynamiclib -fobjc-arc -I"$cef" native/chromium.m -framework AppKit -F"$cef/Release" -framework 'Chromium Embedded Framework' -o "$frameworks/BrowChromium.dylib"
+clang++ -O2 -std=c++17 -I"$cef" native/helper.cpp "$cef/libcef_dll/wrapper/cef_scoped_sandbox_context_mac.mm" -framework Foundation -o target/brow-helper
+for kind in '' ' (GPU)' ' (Renderer)' ' (Plugin)' ' (Alerts)'; do
+  name="Brow Helper$kind"
+  path="$frameworks/$name.app/Contents"
+  mkdir -p "$path/MacOS"
+  cp target/brow-helper "$path/MacOS/$name"
+  suffix="$(echo "$kind" | tr -dc 'a-zA-Z' | tr '[:upper:]' '[:lower:]')"
+  plist "$path/Info.plist" "$identifier.helper${suffix:+.$suffix}" "$name"
+  plutil -insert LSUIElement -bool true "$path/Info.plist"
+  codesign -fs - "$frameworks/$name.app"
+done
+codesign -fs - "$frameworks/Chromium Embedded Framework.framework"
+codesign -fs - "$frameworks/BrowChromium.dylib"
+mkdir -p "$contents/Resources"
+mkdir -p "$contents/Resources/Icons"
+for source in assets/icon.svg assets/icons/*.svg; do
+  name="$(basename "$source" .svg)"
+  if [[ "$name" == icon ]]; then name=Ink; fi
+  sips -s format png -z 1024 1024 "$source" --out "$contents/Resources/Icons/$name.png" >/dev/null
+done
+iconset=target/Brow.iconset
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  sips -s format png -z "$size" "$size" assets/icon.svg --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  double=$((size * 2))
+  sips -s format png -z "$double" "$double" assets/icon.svg --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$contents/Resources/Brow.icns"
+plutil -insert CFBundleIconFile -string Brow.icns "$contents/Info.plist"
+cp "$cef/LICENSE.txt" "$cef/CREDITS.html" "$contents/Resources/"
+codesign -fs - "$app"
+codesign --verify --deep --strict "$app"
+echo "$PWD/$app"
