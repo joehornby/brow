@@ -1,59 +1,63 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="assets/icon.svg" width="64" alt="">
 
 # Brow
 
-A macOS browser for Apple silicon. Rust owns the tabs and navigation policy.
-AppKit provides the window, address palette, menus and rendering surfaces.
-WebKit is the default. Chromium runs through the bundled Chromium Embedded
-Framework (CEF), loaded when the first Chromium tab opens.
+Brow is a macOS browser for presenting interactive prototypes. Set the viewport to the size you designed for, choose WebKit or Chromium for each tab, and hide the controls when you’re ready to present.
+
+![The Counterform prototype in a rounded Brow window. The floating pill below it shows Back, Forward, Reload, the page address, and window controls.](assets/screenshots/window.jpg)
+
+## Navigate from the pill
+
+The address field shows the current hostname, including the port for local demos. Click it to select the full URL. Type an address or search term and press **Return** to navigate, or **Esc** to cancel. Back, Forward, and Reload sit beside the field. The history arrows dim when there’s nowhere to go in that direction.
+
+Press **⌘L** to open the larger address and tab palette, even while the pill is hidden. Type part of an open tab’s title or URL, then use the arrow keys and Return to switch to it.
+
+## Set the frame
+
+Brow opens centred at **1200 × 800 points**, or as large as the display allows. Click the sliders in the floating toolbar to set the width, height, and position. Edits take effect as you type, so you can find a responsive breakpoint while the prototype is running. Press **⌥⌘C** to centre the result. Drag near the top edge, or hold **Option** and drag anywhere on the page.
+
+## Present at that size
+
+Press **⇧⌘F** for **Focus mode**. Brow gives the presentation its own full-screen Space while keeping the page centred at your chosen dimensions. A gradient drawn from the visible page slowly settles around it. For a consistent background across demos, choose a solid colour in **Settings → Window**. Press **⌘ + backslash** to hide the toolbar, and **⇧⌘F** again to return to your original window.
+
+![The same prototype in Focus mode, centred at its original size against Brow’s page-coloured backdrop with the toolbar hidden.](assets/screenshots/focus.jpg)
+
+## Compare WebKit and Chromium, tab by tab
+
+Open the same prototype in two tabs. In **Settings → Browser**, set **Current tab** to Chromium for one and WebKit for the other. Use **⌘1** and **⌘2** to switch between them at the same window size. Changing engines reopens the URL. Each engine has its own cookies and site storage, so a signed-in demo may need signing in twice.
+
+WebKit is the default for new tabs. You can change that default in the same panel. Brow loads its bundled Chromium Embedded Framework when you first open a Chromium tab.
+
+## Keyboard controls
+
+| Action | Shortcut |
+| --- | --- |
+| Open the address and tab palette | ⌘L |
+| Choose a matching tab in the palette | ↑ or ↓, then Return |
+| Cancel an address edit or dismiss the palette | Esc |
+| Open or close a tab | ⌘T / ⌘W |
+| Switch to a numbered tab | ⌘1–9 |
+| Go back / forward | ⌘[ / ⌘] |
+| Reload | ⌘R |
+| Toggle the toolbar | ⌘ + backslash |
+| Centre the window / fill the usable screen | ⌥⌘C / ⌥⌘F |
+| Toggle Focus mode / regular full screen | ⇧⌘F / ⌃⌘F |
+| Open Settings | ⌘, |
 
 ## Build and run
 
-Install Rust and the Xcode command line tools, then run:
+Brow runs on Apple silicon Macs. Install Rust and the Xcode command line tools, then run the following from the repository root.
 
 ```sh
 scripts/build-app
 open target/Brow.app
 ```
 
-The first build downloads the pinned Chromium distribution and checks its
-digest. Later builds use the local copy. The app bundle is self-contained and
-can be moved to Applications. A plain `cargo run` runs the WebKit shell without
-the bundled Chromium engine.
+The first build downloads the pinned Chromium distribution and verifies its digest. Later builds reuse the local copy. You can move the self-contained app bundle to Applications. For a WebKit-only development run, use `cargo run`.
 
-Brow opens centred at 1200 × 800 points, scaled down along either dimension
-when the display has less room. The glass toolbar sits below the page, moving
-inside its lower edge when space is tight. Its sliders open a live size and
-position editor, and the keyboard icon lists Brow’s shortcuts.
+Rust manages tabs and navigation. AppKit draws the window, palette, and toolbar. The [Gecko experiment](experiments/gecko) tracks work on Firefox engine integration.
 
-## Keyboard
-
-- **⌘\** hides or shows the toolbar. **⌥⌘C** centres the window and **⌥⌘F** fills the usable screen.
-- **⌘L** opens the address palette with the current URL selected. Type a URL
-  or search term and press Return. Type part of a tab title or URL, then use
-  the arrow keys and Return to switch. Escape returns to the page.
-- **⌘T**, **⌘W** and **⌘1–9** open, close and switch tabs.
-- **⌘[**, **⌘]** and **⌘R** go back, go forward and reload.
-- **⌘,** opens Browser, Window, and Icon settings. Click an icon to change the
-  Dock icon immediately. Switching the current tab's engine reopens its URL
-  with the selected engine's cookies and site storage.
-- **Settings → Window** accepts width, height, left and top in macOS points,
-  relative to the usable area of the current screen. Valid edits update the window
-  live. Tab and Shift-Tab move between fields. **Centre on screen** repositions it immediately.
-- **⇧⌘F** toggles Focus Full Screen. It centres the page at the window's
-  dimensions, fitting it to the display if needed. Choose a solid colour
-  or a gradient sampled locally from the visible page. Exiting returns to
-  the window frame. **⌃⌘F** still toggles regular full screen.
-
-Tab switches use a directional depth change, focus blur and crossfade. Pages
-receive focus immediately. Reduce Motion switches pages instantly. The page fills a borderless window with 24-point floating corners. Screen-aligned tiles use standard-size corners, and full screen uses square corners. Drag just below the top edge to move the window, or hold **⌥ Option** and drag
-anywhere on the page. A click in the top strip still reaches the website. Opening Brow from the Dock or Finder focuses
-the address palette.
-
-Gecko control research lives under `experiments/gecko`. Desktop Gecko still
-needs an interactive rendering surface before it can join the engine picker.
-
-## Native integration check
+### Native integration checks
 
 ```sh
 BROW_UI_TEST=1 scripts/build-app
@@ -61,5 +65,4 @@ target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain
 target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain -TestReduceMotion YES
 ```
 
-The check runs in a separate bundle and exercises page loading in both engines,
-keyboard commands, interrupted tab changes, and cleanup.
+The checks use a separate app bundle and exercise page loading in both engines, keyboard navigation, interrupted tab transitions, and shutdown.
