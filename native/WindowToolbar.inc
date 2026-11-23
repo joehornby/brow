@@ -1,4 +1,3 @@
-// A child panel keeps the controls outside the page's layout and hit-test area.
 - (void)buildPill {
     NSRect bounds = NSMakeRect(0, 0, 626, 42);
     self.pill = [[PillPanel alloc] initWithContentRect:bounds

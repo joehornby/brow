@@ -1,4 +1,3 @@
-//! Exercise a real Firefox browsing context from Rust without touching the user's profile.
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{

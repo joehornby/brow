@@ -38,8 +38,6 @@ static void dismissPillTip(void);
     @try {
         if (event.type == NSEventTypeLeftMouseDown || event.type == NSEventTypeKeyDown) dismissPillTip();
         if (event.type == NSEventTypeLeftMouseDown && dragPageWindow(event)) return;
-        // Chromium handles key equivalents in its renderer view. Give Brow's
-        // own menu commands first refusal while leaving text editing to AppKit.
         if (event.type == NSEventTypeKeyDown && !self.modalWindow) {
             NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
             NSString *key = event.charactersIgnoringModifiers.lowercaseString;
@@ -205,13 +203,10 @@ static BOOL shouldStartWindowDrag(NSEvent *event) {
         (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand);
     if (modifiers == NSEventModifierFlagOption && !app.overlay) return YES;
     CGFloat depth = NSMaxY(bounds) - point.y;
-    // Leave the outer resize edges to AppKit and all palette controls to their views.
     if (modifiers || depth < 4 || depth > 32 || point.x < 5 || point.x > NSMaxX(bounds) - 5 ||
         (app.card && NSPointInRect([app.card convertPoint:event.locationInWindow fromView:nil], app.card.bounds)))
         return NO;
 
-    // Peek without consuming mouse-up so a click on a site's header still gets
-    // its original down/up pair. Only hand an actual drag to the window server.
     NSEvent *next = [NSApp nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp
                                       untilDate:NSDate.distantFuture inMode:NSEventTrackingRunLoopMode dequeue:NO];
     return next.type == NSEventTypeLeftMouseDragged;
@@ -223,8 +218,6 @@ static BOOL dragPageWindow(NSEvent *event) {
     return YES;
 }
 
-// Finish the initiating menu/key/window event before releasing engine views.
-// CEF's close notifications need the ordinary AppKit run loop to keep running.
 static BOOL prepareQuit(void) {
     if (!app || app.readyToQuit) return NO;
     if (app.quitting) return YES;
@@ -259,9 +252,6 @@ static BOOL prepareQuit(void) {
     return YES;
 }
 
-// Desktop tiling changes the window frame without setting a public tile-state
-// flag. Match the usable screen grid, allowing for macOS tile margins and
-// pixel rounding. A floating window touching just one edge stays floating.
 static BOOL tileBoundary(CGFloat offset, CGFloat length) {
     const CGFloat positions[] = {0, 0.25, 1.0/3, 0.5, 2.0/3, 0.75, 1};
     for (size_t i = 0; i < sizeof(positions)/sizeof(positions[0]); ++i)
@@ -297,7 +287,6 @@ static NSString *selectedIcon(void) {
     if (self.inFullScreen || (self.window.styleMask & NSWindowStyleMaskFullScreen)) {
         radius = 0;
     } else if (tiledFrame(self.window.frame, self.window.screen.visibleFrame)) {
-        // A standard titled AppKit window resolves to 16 pt on modern macOS.
         if (@available(macOS 26, *)) radius = 16;
         else radius = 10;
     }
@@ -426,7 +415,6 @@ static NSString *selectedIcon(void) {
     return YES;
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
-    // System termination requests may enter through the delegate directly.
     if (!prepareQuit()) return NSTerminateNow;
     self.owesTerminationReply = YES;
     return NSTerminateLater;
@@ -590,8 +578,6 @@ static NSString *selectedIcon(void) {
         [self.body addSubview:row];
     }
 }
-// Let Spaces handle the desktop transition. Commit the live page at its final
-// size once, so the compositor never scales a snapshot containing engine layers.
 - (NSArray<NSWindow *> *)customWindowsToEnterFullScreenForWindow:(NSWindow *)window {
     return self.focusMode ? @[window] : nil;
 }
@@ -680,7 +666,6 @@ static NSString *selectedIcon(void) {
 - (void)controlTextDidEndEditing:(NSNotification *)note {
     if (note.object == self.pillEditor) { [self endPillEditing]; return; }
     if ([self.geometryFields containsObject:note.object] || [self.quickFields containsObject:note.object]) {
-        // AppKit detaches the shared field editor after notifying the delegate.
         dispatch_async(dispatch_get_main_queue(), ^{ [self syncGeometryFields]; });
     }
 }
@@ -781,8 +766,6 @@ bool host_create(uint64_t ident, bool useChromium) {
         }
     } else {
         WKWebViewConfiguration *config = [WKWebViewConfiguration new];
-        // Keep WebKit's platform and engine tokens. Sites such as Google serve
-        // legacy forms when the desktop Safari product tokens are absent.
         NSURL *safari = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Safari"];
         NSString *version = safari ? [NSBundle bundleWithURL:safari].infoDictionary[@"CFBundleShortVersionString"] : nil;
         if (version.length)
@@ -794,7 +777,6 @@ bool host_create(uint64_t ident, bool useChromium) {
         wk.allowsBackForwardNavigationGestures = YES;
         p = wk;
     }
-    // A separate compositing layer keeps animations off the engine-owned view.
     Surface *surface = [[Surface alloc] initWithFrame:app.deck.bounds];
     surface.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     surface.wantsLayer = YES;
@@ -817,7 +799,6 @@ static void animate(CALayer *layer, NSString *key, id from, id to, double durati
 }
 
 static CATransform3D depth(NSView *surface, CGFloat scale) {
-    // AppKit-backed layers may have their anchor at the origin.
     CGPoint anchor = surface.layer.anchorPoint;
     CGFloat x = (0.5 - anchor.x) * NSWidth(surface.bounds), y = (0.5 - anchor.y) * NSHeight(surface.bounds);
     CATransform3D t = CATransform3DMakeTranslation(x * (1 - scale), y * (1 - scale), 0);

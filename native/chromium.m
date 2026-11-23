@@ -18,7 +18,6 @@ static cef_client_t client;
 static cef_life_span_handler_t life;
 static cef_browser_process_handler_t process;
 
-// These callback tables are immutable process-lifetime singletons.
 static void hold(cef_base_ref_counted_t *s) {}
 static int keep(cef_base_ref_counted_t *s) { return 0; }
 static int alive(cef_base_ref_counted_t *s) { return 1; }
@@ -73,8 +72,6 @@ static void closed(cef_life_span_handler_t *s, cef_browser_t *b) {
     }
 }
 
-// Pump from an AppKit run-loop source. Running CEF inside a GCD main-queue
-// block prevents nested Chromium work from servicing that same queue.
 static NSTimer *pumpTimer;
 static void schedule(cef_browser_process_handler_t *s, int64_t ms) {
     CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
@@ -155,7 +152,6 @@ static bool start(void) {
 @property int captureID;
 @property(copy) void (^captureReply)(NSImage *);
 @end
-// Observe only the result of our own thumbnail request. No debugging port is opened.
 static cef_dev_tools_message_observer_t captureObserver;
 static NSMapTable<NSNumber *, ChromiumPage *> *capturingPages;
 static void captureResult(cef_dev_tools_message_observer_t *observer, cef_browser_t *browser,
@@ -191,8 +187,6 @@ static void captureResult(cef_dev_tools_message_observer_t *observer, cef_browse
         self.captureRegistration = host->add_dev_tools_message_observer(host,&captureObserver);
         [capturingPages setObject:self forKey:@(self.browser->get_identifier(self.browser))];
     }
-    // Capture the visible viewport, then downsample in the browser UI. JPEG bounds
-    // the transfer cost on image-heavy pages and preserves the actual scroll position.
     self.captureID++;
     NSDictionary *command=@{@"id":@(self.captureID),@"method":@"Page.captureScreenshot",
                             @"params":@{@"format":@"jpeg",@"quality":@30,@"captureBeyondViewport":@NO}};
@@ -250,8 +244,6 @@ static void captureResult(cef_dev_tools_message_observer_t *observer, cef_browse
     if (!self.browser)
         return;
     cef_browser_host_t *h = self.browser->get_host(self.browser);
-    // CEF observes destruction of its NSView. Detach that view before
-    // the engine can request a close of the shared top-level window.
     for (NSView *child in self.subviews.copy)
         [child removeFromSuperview];
     [capturingPages removeObjectForKey:@(self.browser->get_identifier(self.browser))];
