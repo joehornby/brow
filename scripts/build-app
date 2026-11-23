@@ -3,6 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo="${CARGO:-$(command -v cargo || echo "$HOME/.cargo/bin/cargo")}"
 scripts/fetch-cef
+version="$(sed -n '/^\[package\]/,/^\[/ s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
+if [[ -z "$version" ]]; then
+  echo "Cargo.toml has no package version." >&2
+  exit 1
+fi
 app=target/Brow.app
 identifier=local.brow.browser
 if [[ "${BROW_UI_TEST:-0}" == 1 ]]; then
@@ -23,7 +28,8 @@ plist() {
   /usr/bin/plutil -insert CFBundleIdentifier -string "$2" "$1"
   /usr/bin/plutil -insert CFBundleExecutable -string "$3" "$1"
   /usr/bin/plutil -insert CFBundleName -string "$3" "$1"
-  /usr/bin/plutil -insert CFBundleVersion -string 1 "$1"
+  /usr/bin/plutil -insert CFBundleShortVersionString -string "$version" "$1"
+  /usr/bin/plutil -insert CFBundleVersion -string "$version" "$1"
 }
 plist "$contents/Info.plist" "$identifier" Brow
 ditto "$cef/Release/Chromium Embedded Framework.framework" "$frameworks/Chromium Embedded Framework.framework"

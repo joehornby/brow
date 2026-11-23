@@ -67,6 +67,17 @@ target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain -TestReduceMotio
 
 The checks use a separate app bundle and exercise page loading in both engines, keyboard navigation, interrupted tab transitions, and shutdown.
 
+### Versions and releases
+
+The version in `Cargo.toml` is the only source. `scripts/build-app` writes it into the app bundle, so Finder shows it in **Get Info**. To make a release, give the new version to the release script.
+
+```sh
+scripts/release 0.2.0
+git push origin HEAD v0.2.0
+```
+
+The script sets the version in `Cargo.toml` and `Cargo.lock`, commits the change, and adds the annotated tag `v0.2.0`. It does not build the app. Local builds have an ad hoc signature, so a tag does not have an app download attached.
+
 ### No code comments
 
 Code comments are not permitted. `cargo test --test no_comments` fails when a tracked source file has more comment lines than `tests/comment-baseline.txt` allows. Decisions that the code cannot show are in [docs/adr](docs/adr).

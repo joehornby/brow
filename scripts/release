@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+cargo="${CARGO:-$(command -v cargo || echo "$HOME/.cargo/bin/cargo")}"
+version="${1:-}"
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Usage: scripts/release <major.minor.patch>" >&2
+  exit 1
+fi
+tag="v$version"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Commit or discard the local changes first." >&2
+  exit 1
+fi
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  echo "The tag $tag already exists." >&2
+  exit 1
+fi
+sed -i '' "/^\[package\]/,/^\[/ s/^version = \".*\"$/version = \"$version\"/" Cargo.toml
+"$cargo" update --offline --package brow
+if ! git diff --quiet; then
+  git commit -am "Release $tag"
+fi
+git tag -a "$tag" -m "Brow $version"
+echo "Tagged $tag. Publish it with: git push origin HEAD $tag"
