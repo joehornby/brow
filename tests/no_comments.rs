@@ -144,12 +144,55 @@ fn heredoc_delimiter(row: &[char], start: usize) -> Option<(String, bool, usize)
 }
 
 fn hash_comment_lines(source: &str, shell: bool) -> Vec<usize> {
+    if shell { shell_comment_lines(source) } else { toml_comment_lines(source) }
+}
+
+fn toml_comment_lines(source: &str) -> Vec<usize> {
+    let mut lines = Vec::new();
+    let mut quote: Option<(char, bool)> = None;
+    for (index, raw) in source.lines().enumerate() {
+        let row: Vec<char> = raw.chars().collect();
+        let at = |i: usize| row.get(i).copied().unwrap_or('\0');
+        let mut i = 0;
+        while i < row.len() {
+            let c = row[i];
+            match quote {
+                Some(('"', _)) if c == '\\' => i += 1,
+                Some((open, true)) if c == open && at(i + 1) == open && at(i + 2) == open => {
+                    quote = None;
+                    i += 2;
+                }
+                Some((open, false)) if c == open => quote = None,
+                Some(_) => {}
+                None if c == '"' || c == '\'' => {
+                    let triple = at(i + 1) == c && at(i + 2) == c;
+                    quote = Some((c, triple));
+                    if triple {
+                        i += 2;
+                    }
+                }
+                None if c == '#' => {
+                    lines.push(index + 1);
+                    break;
+                }
+                None => {}
+            }
+            i += 1;
+        }
+        if quote.is_some_and(|(_, triple)| !triple) {
+            quote = None;
+        }
+    }
+    lines
+}
+
+fn shell_comment_lines(source: &str) -> Vec<usize> {
     let rows: Vec<&str> = source.lines().collect();
     let ends = |row: &str, word: &str, strip_tabs: bool| {
         (if strip_tabs { row.trim_start_matches('\t') } else { row }) == word
     };
     let mut lines = Vec::new();
-    let mut quote: Option<(char, bool)> = None;
+    let mut context: Vec<char> = Vec::new();
     let mut heredocs: Vec<(String, bool)> = Vec::new();
     for (index, raw) in rows.iter().enumerate() {
         if index == 0 && raw.starts_with("#!") {
@@ -167,49 +210,54 @@ fn hash_comment_lines(source: &str, shell: bool) -> Vec<usize> {
         while i < row.len() {
             let c = row[i];
             let starts_word = word_start;
-            word_start = quote.is_none() && (c.is_whitespace() || ";&|()<>".contains(c));
-            match quote {
-                Some(('"', _)) if c == '\\' => i += 1,
-                Some((open, true)) if c == open && at(i + 1) == open && at(i + 2) == open => {
-                    quote = None;
-                    i += 2;
-                }
-                Some((open, false)) if c == open => quote = None,
-                Some(_) => {}
-                None if shell && c == '\\' => {
-                    word_start = false;
-                    i += 1;
-                }
-                None if c == '"' || c == '\'' => {
-                    let triple = !shell && at(i + 1) == c && at(i + 2) == c;
-                    quote = Some((c, triple));
-                    if triple {
-                        i += 2;
+            word_start = false;
+            match context.last().copied() {
+                Some('\'') => {
+                    if c == '\'' {
+                        context.pop();
                     }
                 }
-                None if c == '#' => {
-                    if !shell || starts_word {
+                Some('"') => match c {
+                    '\\' => i += 1,
+                    '"' => {
+                        context.pop();
+                    }
+                    '$' if at(i + 1) == '(' => {
+                        context.push('(');
+                        word_start = true;
+                        i += 1;
+                    }
+                    _ => {}
+                },
+                _ => match c {
+                    '\\' => i += 1,
+                    '"' | '\'' => context.push(c),
+                    '(' => {
+                        context.push('(');
+                        word_start = true;
+                    }
+                    ')' => {
+                        context.pop();
+                        word_start = true;
+                    }
+                    '#' if starts_word => {
                         lines.push(index + 1);
                         break;
                     }
-                }
-                None if shell && c == '<' && at(i + 1) == '<' => {
-                    if at(i + 2) == '<' {
-                        i += 2;
-                    } else if let Some((word, strip_tabs, next)) = heredoc_delimiter(&row, i + 2) {
-                        if rows[index + 1..].iter().any(|later| ends(later, &word, strip_tabs)) {
-                            heredocs.push((word, strip_tabs));
-                            i = next;
-                            continue;
+                    '<' if at(i + 1) == '<' && at(i + 2) == '<' => i += 2,
+                    '<' if at(i + 1) == '<' => {
+                        if let Some((word, strip_tabs, next)) = heredoc_delimiter(&row, i + 2) {
+                            if rows[index + 1..].iter().any(|later| ends(later, &word, strip_tabs)) {
+                                heredocs.push((word, strip_tabs));
+                                i = next;
+                                continue;
+                            }
                         }
                     }
-                }
-                None => {}
+                    _ => word_start = c.is_whitespace() || ";&|<>".contains(c),
+                },
             }
             i += 1;
-        }
-        if !shell && quote.is_some_and(|(_, triple)| !triple) {
-            quote = None;
         }
     }
     lines
@@ -299,6 +347,8 @@ fn hash_scanner_ignores_shell_literals() {
     assert_eq!(hash_comment_lines("echo \\\" # one\necho \\ #no\necho ok;# three\n", true), [1, 3]);
     let heredoc = "cat <<'EOF'\n# no\nEOF\ncat <<-END <<< \"# no\"\n\t# no\n\tEND\necho $((1 << n)) # seven\n";
     assert_eq!(hash_comment_lines(heredoc, true), [7]);
+    let nested = "cd \"$(dirname \"$0\")/..\" # one\nsuffix=\"$(\n  # three\n  echo \"$kind\" | tr -dc 'a-z#'\n)\"\nplist() {\n  echo \"# no\" # seven\n}\n";
+    assert_eq!(hash_comment_lines(nested, true), [1, 3, 7]);
 }
 
 #[test]
