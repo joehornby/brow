@@ -1,4 +1,3 @@
-//! Tab ownership, selection, navigation policy and native host dispatch.
 use std::{
     cell::RefCell,
     ffi::{CStr, CString, c_char},

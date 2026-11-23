@@ -1,4 +1,3 @@
-// OKLCH uses a polar form of Oklab. Conversion matrices assume D65 linear sRGB.
 typedef struct {
     double L, C, h;
 } FocusLCH;
@@ -33,7 +32,6 @@ static FocusRGB focusLinearRGB(FocusLCH color) {
                       -.0041960863 * l - .7034186147 * m + 1.707614701 * s};
 }
 static NSColor *focusColor(FocusLCH color) {
-    // Reduce only chroma for out-of-gamut stops, preserving hue and lightness.
     double low = 0, high = color.C;
     FocusRGB rgb = focusLinearRGB(color);
     for (int i = 0; i < 12; i++) {

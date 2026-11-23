@@ -1,4 +1,3 @@
-// Browser's native settings window and the centered-page full-screen layout.
 static NSTextField *caption(NSView *parent, NSString *text, NSRect frame, BOOL headline) {
     NSTextField *label = [NSTextField labelWithString:text];
     label.frame = frame;
@@ -55,7 +54,6 @@ static NSArray *siteGradient(NSImage *image) {
         for (int c = 0; c < 3; c++)
             sums[bin][c] += p[c];
     }
-    // Weight chromatic regions so a colored masthead survives a mostly white page.
     double best = -1;
     int accent = 0, base = 0;
     for (int i = 0; i < 64; i++) {
@@ -78,8 +76,6 @@ static NSArray *siteGradient(NSImage *image) {
         double d = 255. * counts[i];
         tones[n] = focusLCH(sums[i][0] / d, sums[i][1] / d, sums[i][2] / d);
     }
-    // On mostly-white sites carry the accent through the darker end.
-    // Neutral pages retain a neutral gradient.
     if (tones[1].C < .035 && tones[0].C > .035) {
         tones[1].h = tones[0].h + .19;
         tones[1].C = tones[0].C * .64;
@@ -102,8 +98,6 @@ static NSArray *siteGradient(NSImage *image) {
     [self.backdrop removeAnimationForKey:key];
     if (duration > 0 && from.count == target.count &&
         !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
-        // Follow the shorter hue arc over time too, including when a new
-        // sample interrupts a transition between very different sites.
         NSMutableArray *frames = [NSMutableArray arrayWithObject:from];
         FocusLCH start[FocusStopCount], end[FocusStopCount];
         for (int i = 0; i < FocusStopCount; i++) {
@@ -460,8 +454,6 @@ static NSArray *siteGradient(NSImage *image) {
         NSString *text = field.currentEditor ? field.currentEditor.string : field.stringValue;
         NSScanner *scanner = [NSScanner scannerWithString:text];
         if ([scanner scanInteger:&number] && scanner.isAtEnd) {
-            // Intermediate digits are valid editing states. Keep the live frame
-            // stable until the dimension fits, without replacing typed text.
             if (i == 0 && (number < self.window.minSize.width || number > NSWidth(screen)))
                 continue;
             if (i == 1 && (number < self.window.minSize.height || number > NSHeight(screen)))

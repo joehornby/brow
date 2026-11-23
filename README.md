@@ -66,3 +66,7 @@ target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain -TestReduceMotio
 ```
 
 The checks use a separate app bundle and exercise page loading in both engines, keyboard navigation, interrupted tab transitions, and shutdown.
+
+### No code comments
+
+Code comments are not permitted. `cargo test --test no_comments` fails when a tracked source file has more comment lines than `tests/comment-baseline.txt` allows. Decisions that the code cannot show are in [docs/adr](docs/adr).

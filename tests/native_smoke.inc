@@ -1,4 +1,3 @@
-// Compiled only in the ui-test build, which uses a separate app bundle and profile.
 static void check(BOOL ok, const char *message) {
     if (!ok) { fprintf(stderr,"FAIL: %s\n",message); exit(2); }
 }
