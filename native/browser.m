@@ -287,7 +287,6 @@ static CGColorRef captionColor(BOOL selected) {
         if (NSPointInRect(point, [self barRect:tile])) return editAddress(tile);
     for (Tile *tile in self.subviews)
         if (NSPointInRect(point, [self handle:tile])) self.held = tile;
-    stopEditingAddress();
     if (!self.held) return [super mouseDown:event];
     self.grip = point;
     self.slot = -1;
@@ -615,23 +614,27 @@ static BOOL blank(Tile *tile) {
 static void navigate(NSString *address) {
     NSArray<Tile *> *tiles = targetTiles(), *all = surfaceOf(page()).subviews;
     BOOL fresh = YES;
-    for (Tile *tile in all) fresh &= [tiles containsObject:tile] || blank(tile);
+    for (Tile *tile in all) fresh &= blank(tile);
     for (Tile *tile in fresh ? all : tiles) [tile follow:address];
 }
 static void chooseViewport(NSEvent *event) {
     Surface *surface = surfaceOf(page());
     if (!app || event.window != app.window || app.overlay || !separatePages() || surface.subviews.count < 2) return;
     NSPoint point = [surface convertPoint:event.locationInWindow fromView:nil];
-    if (app.editedTile && !NSPointInRect(point, [surface barRect:app.editedTile])) [app endViewportEditing];
+    BOOL ended = app.editedTile && !NSPointInRect(point, [surface barRect:app.editedTile]), onBar = NO;
+    if (ended) [app endViewportEditing];
+    for (Tile *tile in surface.subviews) onBar |= NSPointInRect(point, [surface barRect:tile]);
     for (Tile *tile in surface.subviews) {
         if (tile.page == page() || !(NSPointInRect(point, tile.frame) || NSPointInRect(point, [surface handle:tile]))) continue;
         app.pages[@(brow_current())] = tile.page;
         [surface select:tile];
         [app syncPillNavigation:nil];
-        return;
+        break;
     }
+    if (ended && !onBar) [page() focus];
 }
 static void editAddress(Tile *tile) {
+    if (tile == app.editedTile && app.barEditor.superview) return;
     Surface *surface = (Surface *)tile.superview;
     app.pages[@(brow_current())] = tile.page;
     [surface select:tile];

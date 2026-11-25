@@ -292,7 +292,8 @@ static void viewportsTest(BOOL useChromium) {
             [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:gap modifierFlags:0
                 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
                 context:nil eventNumber:1 clickCount:1 pressure:1]];
-        check(!app.barEditor.superview && page()==first.page,"a click outside the address bar ends the edit");
+        check(!app.barEditor.superview && page()==first.page && app.window.firstResponder!=app.window,
+              "a click outside the address bar ends the edit and gives focus back to the page");
         for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
             [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:barPoint modifierFlags:0
                 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
@@ -341,6 +342,20 @@ static void viewportsTest(BOOL useChromium) {
                   "an address bar moves with its viewport");
             drag(NSEventTypeLeftMouseUp,12);
             check(page()==lead.page && CGRectEqualToRect(lead.bar.frame,barWas),"an address bar settles under its viewport");
+            [app newTab:nil];
+            [app dismiss];
+            Surface *opened=surfaceOf(page());
+            check(opened!=surface && opened.subviews.count==3 && opened.bars,"a new tab has a viewport for each selection");
+            navigate(@"data:text/html,<body%20id=fresh>");
+            BOOL everywhere=YES;
+            for (Tile *tile in opened.subviews) everywhere&=[tile.address containsString:@"id=fresh"];
+            check(everywhere,"a new tab loads its address in every viewport");
+            navigate(@"data:text/html,<body%20id=later>");
+            check([((Tile *)page().superview).address containsString:@"id=later"] &&
+                  [((Tile *)opened.subviews.lastObject).address containsString:@"id=fresh"],
+                  "after the first load the address field loads only the selected viewport");
+            brow_close_tab();
+            check(surfaceOf(page())==surface && page()==lead.page,"closing the new tab returns to the selected viewport");
             [open performClick:nil];
             [syncBox() performClick:nil];
             [app.toolPopover close];

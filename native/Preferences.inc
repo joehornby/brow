@@ -358,7 +358,8 @@ static NSArray *siteGradient(NSImage *image) {
         NSString *url = page().address;
         NSMutableDictionary<NSNumber *, NSString *> *addresses = [NSMutableDictionary dictionary];
         for (Tile *tile in surfaceOf(page()).subviews)
-            if (tile.page.address.length) addresses[@(tile.preset)] = tile.page.address;
+            if (tile.address.length || tile.page.address.length)
+                addresses[@(tile.preset)] = tile.address.length ? tile.address : tile.page.address;
         NSInteger selected = ((Tile *)page().superview).preset;
         if (brow_new(useChromium, true)) {
             Surface *surface = surfaceOf(page());
