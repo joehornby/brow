@@ -359,11 +359,18 @@ static NSArray *siteGradient(NSImage *image) {
         NSMutableDictionary<NSNumber *, NSString *> *addresses = [NSMutableDictionary dictionary];
         for (Tile *tile in surfaceOf(page()).subviews)
             if (tile.page.address.length) addresses[@(tile.preset)] = tile.page.address;
+        NSInteger selected = ((Tile *)page().superview).preset;
         if (brow_new(useChromium, true)) {
-            for (Tile *tile in surfaceOf(page()).subviews) {
-                NSString *address = separatePages() && addresses[@(tile.preset)] ? addresses[@(tile.preset)] : url;
+            Surface *surface = surfaceOf(page());
+            for (Tile *tile in surface.subviews) {
+                NSString *address = separatePages() ? addresses[@(tile.preset)] : url;
                 if (address.length) [tile follow:address];
+                if (separatePages() && tile.preset == selected && surface.subviews.count > 1) {
+                    self.pages[@(brow_current())] = tile.page;
+                    [surface select:tile];
+                }
             }
+            [self syncPillNavigation:nil];
         } else
             [sender selectItemAtIndex:chromium()];
     }

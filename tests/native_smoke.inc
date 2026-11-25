@@ -112,6 +112,12 @@ static BOOL drawsText(CALayer *layer) {
 }
 static void viewportsTest(BOOL useChromium) {
     [app dismiss];
+    check([shortAddress(@"http://[::1]:5173/app") isEqual:@"[::1]:5173/app"] &&
+          [shortAddress(@"https://example.com:08080/") isEqual:@"example.com:08080"] &&
+          [shortAddress(@"https://user:pw@example.com/a?b=1#c") isEqual:@"example.com/a?b=1#c"] &&
+          [shortAddress(@"file:///Users/x/proto.html") isEqual:@"proto.html"] &&
+          [shortAddress(@"data:text/html,x") isEqual:@"data:text/html,x"] && [shortAddress(@"about:blank") isEqual:@""],
+          "address bars shorten addresses");
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"isolateViewports"];
     if (useChromium) check(brow_new(true,true),"Chromium viewports test");
     [page() navigate:@"data:text/html,<body%20style='background:teal'><script>c='';onclick=e=>c='%20'+e.clientX+','+e.clientY;setInterval(()=>document.title=innerWidth+'x'+innerHeight+c,50)</script>"];
@@ -281,9 +287,28 @@ static void viewportsTest(BOOL useChromium) {
                 context:nil eventNumber:1 clickCount:1 pressure:1]];
         barEditor=(NSTextView *)app.barEditor.currentEditor;
         check(page()==first.page && barEditor,"the address bar edits the viewport under it");
-        [barEditor insertText:@"brow viewport" replacementRange:NSMakeRange(0,barEditor.string.length)];
+        NSPoint gap=[surface convertPoint:NSMakePoint(NSMidX(surface.bounds),NSMaxY(surface.bounds)-40) toView:nil];
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:gap modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        check(!app.barEditor.superview && page()==first.page,"a click outside the address bar ends the edit");
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:barPoint modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        [app.window setFrame:NSInsetRect(app.window.frame,10,10) display:YES];
+        check(!app.barEditor.superview,"resizing the window ends the edit");
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:
+                [surface convertPoint:NSMakePoint(CGRectGetMidX(first.bar.frame),CGRectGetMidY(first.bar.frame)) toView:nil]
+                modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        barEditor=(NSTextView *)app.barEditor.currentEditor;
+        check(barEditor!=nil,"the address bar edits again after a resize");
+        [barEditor insertText:@"127.0.0.1:9/own" replacementRange:NSMakeRange(0,barEditor.string.length)];
         [barEditor doCommandBySelector:@selector(insertNewline:)];
-        check(!app.barEditor.superview && [first.address containsString:@"q=brow+viewport"] &&
+        check(!app.barEditor.superview && [first.address containsString:@"127.0.0.1:9/own"] &&
               [second.address containsString:@"id=second"] && [third.address containsString:@"id=second"],
               "Return in an address bar loads only that viewport");
         navigate(@"data:text/html,<body%20id=own>");
@@ -302,6 +327,20 @@ static void viewportsTest(BOOL useChromium) {
                   "hiding the toolbar hides the address bars");
             [app togglePill:nil];
             check(surface.bars && !first.bar.hidden,"showing the toolbar shows the address bars");
+            Tile *lead=(Tile *)page().superview;
+            NSRect barWas=lead.bar.frame;
+            NSPoint hold=NSMakePoint(CGRectGetMidX(lead.caption.frame),CGRectGetMidY(lead.caption.frame));
+            void (^drag)(NSEventType,CGFloat)=^(NSEventType type,CGFloat d) {
+                [NSApp sendEvent:[NSEvent mouseEventWithType:type location:[surface convertPoint:NSMakePoint(hold.x+d,hold.y+d) toView:nil]
+                    modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                    context:nil eventNumber:1 clickCount:1 pressure:1]];
+            };
+            drag(NSEventTypeLeftMouseDown,0);
+            drag(NSEventTypeLeftMouseDragged,12);
+            check(near(CGRectGetMinX(lead.bar.frame),CGRectGetMinX(barWas)+12) && near(CGRectGetMinY(lead.bar.frame),CGRectGetMinY(barWas)+12),
+                  "an address bar moves with its viewport");
+            drag(NSEventTypeLeftMouseUp,12);
+            check(page()==lead.page && CGRectEqualToRect(lead.bar.frame,barWas),"an address bar settles under its viewport");
             [open performClick:nil];
             [syncBox() performClick:nil];
             [app.toolPopover close];

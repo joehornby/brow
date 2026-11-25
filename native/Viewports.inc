@@ -102,7 +102,6 @@ static NSString *viewportHint(void) {
     [surface sortSubviewsUsingFunction:presetOrder context:(__bridge void *)wanted];
     BOOL separate = separatePages() && surface.subviews.count > 1;
     surface.bars = separate && ![NSUserDefaults.standardUserDefaults boolForKey:@"toolbarHidden"];
-    if (!surface.bars) [self endViewportEditing];
     Tile *selected = separate && activeKept ? (Tile *)active.superview : surface.subviews.firstObject;
     self.pages[@(brow_current())] = selected.page;
     [surface select:separate ? selected : nil];

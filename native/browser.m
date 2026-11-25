@@ -28,6 +28,7 @@ static void moveViewport(NSUInteger from, NSUInteger to);
 static void chooseViewport(NSEvent *event);
 @class Tile;
 static void editAddress(Tile *tile);
+static void stopEditingAddress(void);
 static BOOL reducedMotion(void);
 
 @interface BrowApplication : NSApplication <CefAppProtocol>
@@ -233,12 +234,16 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 - (void)showAddresses;
 @end
 static NSString *shortAddress(NSString *address) {
-    NSURL *url = address.length ? [NSURL URLWithString:address] : nil;
-    if (!url.host.length) return [address isEqual:@"about:blank"] ? @"" : address ?: @"";
-    NSString *shown = url.port ? [NSString stringWithFormat:@"%@:%@", url.host, url.port] : url.host;
-    NSString *rest = [address substringFromIndex:[address rangeOfString:url.host].location + url.host.length];
-    if (url.port) rest = [rest substringFromIndex:MIN(rest.length, url.port.stringValue.length + 1)];
-    return [rest isEqual:@"/"] ? shown : [shown stringByAppendingString:rest];
+    if (!address.length || [address isEqual:@"about:blank"]) return @"";
+    NSURLComponents *parts = [NSURLComponents componentsWithString:address];
+    NSRange host = parts.rangeOfHost;
+    if (!parts || host.location == NSNotFound || !host.length) {
+        NSURL *url = [NSURL URLWithString:address];
+        return url.isFileURL && url.lastPathComponent.length ? url.lastPathComponent : address;
+    }
+    NSString *shown = [parts.string substringFromIndex:host.location];
+    BOOL bare = [parts.path isEqual:@"/"] && !parts.query && !parts.fragment;
+    return bare && [shown hasSuffix:@"/"] ? [shown substringToIndex:shown.length - 1] : shown;
 }
 static CGColorRef captionColor(BOOL selected) {
     return (selected ? [NSColor colorWithSRGBRed:0 green:.4 blue:.9 alpha:.92] : [NSColor colorWithWhite:0 alpha:.55]).CGColor;
@@ -249,7 +254,7 @@ static CGColorRef captionColor(BOOL selected) {
     [CATransaction begin];
     [CATransaction setDisableActions:reducedMotion()];
     [CATransaction setAnimationDuration:.16];
-    for (Tile *each in self.subviews) each.caption.backgroundColor = captionColor(each == tile);
+    for (Tile *each in self.subviews) each.caption.backgroundColor = captionColor(each == tile && self.bars);
     [CATransaction commit];
 }
 - (NSView *)hitTest:(NSPoint)point {
@@ -282,6 +287,7 @@ static CGColorRef captionColor(BOOL selected) {
         if (NSPointInRect(point, [self barRect:tile])) return editAddress(tile);
     for (Tile *tile in self.subviews)
         if (NSPointInRect(point, [self handle:tile])) self.held = tile;
+    stopEditingAddress();
     if (!self.held) return [super mouseDown:event];
     self.grip = point;
     self.slot = -1;
@@ -401,6 +407,7 @@ static CGColorRef captionColor(BOOL selected) {
     [CATransaction commit];
 }
 - (void)arrange {
+    stopEditingAddress();
     if (self.held) {
         [self.held.layer removeAnimationForKey:@"lift"];
         self.held = nil;
@@ -452,7 +459,7 @@ static CGColorRef captionColor(BOOL selected) {
     CGFloat width = ceil(size.width) + 16;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    tile.caption.backgroundColor = captionColor(tile == self.selected);
+    tile.caption.backgroundColor = captionColor(tile == self.selected && self.bars);
     label.string = [[NSAttributedString alloc] initWithString:shown attributes:style];
     label.contentsScale = self.window.backingScaleFactor ?: 2;
     label.frame = CGRectMake(8, round((20 - ceil(size.height)) / 2), ceil(size.width), ceil(size.height));
@@ -601,13 +608,21 @@ static NSArray<Tile *> *targetTiles(void) {
     NSArray<Tile *> *tiles = surfaceOf(page()).subviews;
     return separatePages() && tiles.count > 1 ? @[(Tile *)page().superview] : tiles;
 }
+static BOOL blank(Tile *tile) {
+    NSString *address = tile.page.address;
+    return !tile.address.length && (!address.length || [address isEqual:@"about:blank"]);
+}
 static void navigate(NSString *address) {
-    for (Tile *tile in targetTiles()) [tile follow:address];
+    NSArray<Tile *> *tiles = targetTiles(), *all = surfaceOf(page()).subviews;
+    BOOL fresh = YES;
+    for (Tile *tile in all) fresh &= [tiles containsObject:tile] || blank(tile);
+    for (Tile *tile in fresh ? all : tiles) [tile follow:address];
 }
 static void chooseViewport(NSEvent *event) {
     Surface *surface = surfaceOf(page());
     if (!app || event.window != app.window || app.overlay || !separatePages() || surface.subviews.count < 2) return;
     NSPoint point = [surface convertPoint:event.locationInWindow fromView:nil];
+    if (app.editedTile && !NSPointInRect(point, [surface barRect:app.editedTile])) [app endViewportEditing];
     for (Tile *tile in surface.subviews) {
         if (tile.page == page() || !(NSPointInRect(point, tile.frame) || NSPointInRect(point, [surface handle:tile]))) continue;
         app.pages[@(brow_current())] = tile.page;
@@ -622,6 +637,11 @@ static void editAddress(Tile *tile) {
     [surface select:tile];
     [app syncPillNavigation:nil];
     [app editViewportAddress:tile];
+}
+static void stopEditingAddress(void) {
+    if (!app.barEditor.superview) return;
+    [app endViewportEditing];
+    [page() focus];
 }
 static void command(SEL action) {
     for (Tile *tile in targetTiles()) {
