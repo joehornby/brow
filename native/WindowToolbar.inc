@@ -112,14 +112,15 @@
     if (!label.length) label = url.isFileURL ? url.lastPathComponent : nil;
     BOOL blank = !address.length || [address isEqual:@"about:blank"];
     self.pillAddress.title = label.length ? label : (blank ? @"Search or enter URL" : @"Page address");
-    BOOL back = NO, forward = NO;
+    BOOL back = NO, forward = NO, reload = NO;
     for (NSView<BrowPage> *p in copies) {
         back |= p.canGoBack;
         forward |= p.canGoForward;
+        reload |= p.address.length && ![p.address isEqual:@"about:blank"];
     }
     self.pillBack.enabled = back;
     self.pillForward.enabled = forward;
-    self.pillReload.enabled = !blank;
+    self.pillReload.enabled = reload;
 }
 - (void)mouseEntered:(NSEvent *)event {
     NSButton *button = (NSButton *)[event.trackingArea.userInfo[@"button"] nonretainedObjectValue];
