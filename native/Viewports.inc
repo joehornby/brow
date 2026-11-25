@@ -1,3 +1,7 @@
+static NSString *viewportHint(void) {
+    return separatePages() ? @"Type in the bar under a viewport to change its page."
+                           : @"Each viewport keeps its size and scales to fit the window frame.";
+}
 - (void)showViewports:(NSButton *)button {
     if (![self prepareToolFrom:button]) return;
     NSArray<NSArray *> *presets = viewportPresets();
@@ -19,13 +23,13 @@
     NSBox *line = [[NSBox alloc] initWithFrame:NSMakeRect(18, 88, 252, 1)];
     line.boxType = NSBoxSeparator;
     [body addSubview:line];
-    NSButton *sync = [NSButton checkboxWithTitle:@"Follow links in all viewports" target:self
+    NSButton *sync = [NSButton checkboxWithTitle:@"Same page in all viewports" target:self
                                           action:@selector(toggleViewportSync:)];
     sync.frame = NSMakeRect(18, 54, 252, 22);
-    sync.state = ![NSUserDefaults.standardUserDefaults boolForKey:@"isolateViewports"];
+    sync.state = !separatePages();
     [body addSubview:sync];
-    NSTextField *hint = caption(body, @"Each viewport keeps its size and scales to fit the window frame.",
-                                NSMakeRect(18, 14, 252, 32), NO);
+    NSTextField *hint = caption(body, viewportHint(), NSMakeRect(18, 14, 252, 32), NO);
+    hint.identifier = @"viewportHint";
     hint.textColor = NSColor.secondaryLabelColor;
     hint.font = [NSFont systemFontOfSize:12];
     hint.maximumNumberOfLines = 2;
@@ -50,6 +54,13 @@
 }
 - (void)toggleViewportSync:(NSButton *)sender {
     [NSUserDefaults.standardUserDefaults setBool:!sender.state forKey:@"isolateViewports"];
+    NSString *address = page().address;
+    if (sender.state && address.length)
+        for (Tile *tile in surfaceOf(page()).subviews)
+            if (![tile.page.address isEqual:address]) [tile follow:address];
+    for (NSTextField *hint in sender.superview.subviews)
+        if ([hint.identifier isEqual:@"viewportHint"]) hint.stringValue = viewportHint();
+    [self syncViewports];
 }
 - (void)followNavigation {
     NSArray<Tile *> *tiles = surfaceOf(page()).subviews;
@@ -76,7 +87,9 @@
     for (Tile *tile in tiles)
         if (tile != kept && ![wanted containsObject:@(tile.preset)]) [surface drop:tile];
     if (!wanted.count) kept.preset = -1;
-    NSString *address = kept.page.address;
+    NSView<BrowPage> *active = page();
+    BOOL activeKept = active.superview.superview == surface;
+    NSString *address = (activeKept ? active : kept.page).address;
     for (NSNumber *index in wanted) {
         if ([[surface.subviews valueForKey:@"preset"] containsObject:index]) continue;
         NSView<BrowPage> *extra = createPage(useChromium);
@@ -87,7 +100,12 @@
         if (address.length) [tile follow:address];
     }
     [surface sortSubviewsUsingFunction:presetOrder context:(__bridge void *)wanted];
-    self.pages[@(brow_current())] = ((Tile *)surface.subviews.firstObject).page;
+    BOOL separate = separatePages() && surface.subviews.count > 1;
+    surface.bars = separate && ![NSUserDefaults.standardUserDefaults boolForKey:@"toolbarHidden"];
+    if (!surface.bars) [self endViewportEditing];
+    Tile *selected = separate && activeKept ? (Tile *)active.superview : surface.subviews.firstObject;
+    self.pages[@(brow_current())] = selected.page;
+    [surface select:separate ? selected : nil];
     NSMutableArray<NSValue *> *sizes = [NSMutableArray array];
     NSMutableArray<NSString *> *titles = [NSMutableArray array];
     for (Tile *tile in surface.subviews) {
@@ -102,4 +120,33 @@
     if (self.focusMode) [self layoutFocus];
     [surface arrange];
     [self syncPillNavigation:nil];
+}
+- (void)editViewportAddress:(Tile *)tile {
+    [self dismiss];
+    if (!self.barEditor) {
+        NSTextField *editor = self.barEditor = [NSTextField new];
+        editor.placeholderString = @"Search or enter URL";
+        editor.accessibilityLabel = @"Viewport address";
+        editor.bezelStyle = NSTextFieldRoundedBezel;
+        editor.font = [NSFont systemFontOfSize:12];
+        editor.usesSingleLineMode = YES;
+        editor.maximumNumberOfLines = 1;
+        editor.lineBreakMode = NSLineBreakByClipping;
+        editor.cell.wraps = NO;
+        editor.cell.scrollable = YES;
+        editor.delegate = self;
+    }
+    self.editedTile = tile;
+    NSRect rect = [tile.superview convertRect:NSRectFromCGRect(tile.bar.frame) toView:self.window.contentView];
+    self.barEditor.frame = NSInsetRect(rect, 0, -1);
+    [self.window.contentView addSubview:self.barEditor positioned:NSWindowAbove relativeTo:nil];
+    self.barEditor.stringValue = tile.page.address ?: @"";
+    [self.window makeKeyAndOrderFront:nil];
+    [self.barEditor selectText:nil];
+    NSText *field = self.barEditor.currentEditor;
+    [field scrollRangeToVisible:NSMakeRange(field.string.length, 0)];
+}
+- (void)endViewportEditing {
+    self.editedTile = nil;
+    [self.barEditor removeFromSuperview];
 }
