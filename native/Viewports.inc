@@ -139,7 +139,7 @@ static NSString *viewportHint(void) {
     NSRect rect = [tile.superview convertRect:NSRectFromCGRect(tile.bar.frame) toView:self.window.contentView];
     self.barEditor.frame = NSInsetRect(rect, 0, -1);
     [self.window.contentView addSubview:self.barEditor positioned:NSWindowAbove relativeTo:nil];
-    self.barEditor.stringValue = tile.page.address ?: @"";
+    self.barEditor.stringValue = tile.page.address.length ? tile.page.address : tile.address ?: @"";
     [self.window makeKeyAndOrderFront:nil];
     [self.barEditor selectText:nil];
     NSText *field = self.barEditor.currentEditor;

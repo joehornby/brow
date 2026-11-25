@@ -495,7 +495,7 @@ static CGColorRef captionColor(BOOL selected) {
 }
 - (void)showAddress:(Tile *)tile {
     if (!tile.bar || tile.bar.hidden) return;
-    NSString *address = shortAddress(tile.page.address);
+    NSString *address = shortAddress(tile.page.address.length ? tile.page.address : tile.address);
     BOOL empty = !address.length;
     CATextLayer *text = (CATextLayer *)tile.bar.sublayers.firstObject;
     NSString *string = empty ? @"Search or enter URL" : address;
@@ -1169,7 +1169,8 @@ static NSString *selectedIcon(void) {
 }
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)editor doCommandBySelector:(SEL)sel {
     if (control == self.barEditor) {
-        if (sel != @selector(insertNewline:) && sel != @selector(cancelOperation:)) return NO;
+        if (sel != @selector(insertNewline:) && sel != @selector(cancelOperation:) && sel != @selector(insertTab:) &&
+            sel != @selector(insertBacktab:)) return NO;
         NSString *input = editor.string.copy;
         Tile *tile = self.editedTile;
         [self endViewportEditing];
