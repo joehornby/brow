@@ -257,6 +257,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
         self.lifted = YES;
         for (Tile *other in self.subviews) other.layer.zPosition = other.caption.zPosition = other == tile;
         [tile.layer removeAnimationForKey:@"settle"];
+        [tile.caption removeAnimationForKey:@"settle"];
         NSRect raised = NSInsetRect(self.home, -NSWidth(self.home) * .012, -NSHeight(self.home) * .012);
         if (!reducedMotion())
             spring(tile.layer, @"transform", [NSValue valueWithCATransform3D:tile.layer.transform],
