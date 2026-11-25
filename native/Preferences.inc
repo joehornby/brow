@@ -356,9 +356,22 @@ static NSArray *siteGradient(NSImage *image) {
         [NSUserDefaults.standardUserDefaults setBool:useChromium forKey:@"chromium"];
     else if (useChromium != chromium()) {
         NSString *url = page().address;
+        NSMutableDictionary<NSNumber *, NSString *> *addresses = [NSMutableDictionary dictionary];
+        for (Tile *tile in surfaceOf(page()).subviews)
+            if (tile.address.length || tile.page.address.length)
+                addresses[@(tile.preset)] = tile.address.length ? tile.address : tile.page.address;
+        NSInteger selected = ((Tile *)page().superview).preset;
         if (brow_new(useChromium, true)) {
-            if (url.length)
-                navigate(url);
+            Surface *surface = surfaceOf(page());
+            for (Tile *tile in surface.subviews) {
+                NSString *address = separatePages() ? addresses[@(tile.preset)] : url;
+                if (address.length) [tile follow:address];
+                if (separatePages() && tile.preset == selected && surface.subviews.count > 1) {
+                    self.pages[@(brow_current())] = tile.page;
+                    [surface select:tile];
+                }
+            }
+            [self syncPillNavigation:nil];
         } else
             [sender selectItemAtIndex:chromium()];
     }

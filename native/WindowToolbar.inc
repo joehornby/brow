@@ -104,6 +104,7 @@
     [self followNavigation];
     NSView<BrowPage> *current = page();
     NSArray<NSView<BrowPage> *> *copies = currentPages();
+    [surfaceOf(current) showAddresses];
     if (note.object && ![copies containsObject:note.object]) return;
     NSString *address = current.address;
     NSURL *url = address.length ? [NSURL URLWithString:address] : nil;
@@ -113,7 +114,7 @@
     BOOL blank = !address.length || [address isEqual:@"about:blank"];
     self.pillAddress.title = label.length ? label : (blank ? @"Search or enter URL" : @"Page address");
     BOOL back = NO, forward = NO, reload = NO;
-    for (NSView<BrowPage> *p in copies) {
+    for (NSView<BrowPage> *p in [targetTiles() valueForKey:@"page"]) {
         back |= p.canGoBack;
         forward |= p.canGoForward;
         reload |= p.address.length && ![p.address isEqual:@"about:blank"];
@@ -225,6 +226,7 @@
         [self.window removeChildWindow:self.pill];
         [self.pill orderOut:nil];
     } else [self attachPill];
+    [self syncViewports];
 }
 - (void)centreWindow:(id)sender {
     if (!self.inFullScreen) [self applyFields:nil centre:YES];

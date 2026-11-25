@@ -25,6 +25,10 @@ static BOOL dragPageWindow(NSEvent *event);
 static BOOL prepareQuit(void);
 static void dismissPillTip(void);
 static void moveViewport(NSUInteger from, NSUInteger to);
+static void chooseViewport(NSEvent *event);
+@class Tile;
+static void editAddress(Tile *tile);
+static void stopEditingAddress(void);
 static BOOL reducedMotion(void);
 
 @interface BrowApplication : NSApplication <CefAppProtocol>
@@ -41,6 +45,7 @@ static BOOL reducedMotion(void);
     @try {
         if (event.type == NSEventTypeLeftMouseDown || event.type == NSEventTypeKeyDown) dismissPillTip();
         if (event.type == NSEventTypeLeftMouseDown && dragPageWindow(event)) return;
+        if (event.type == NSEventTypeLeftMouseDown) chooseViewport(event);
         if (event.type == NSEventTypeKeyDown && !self.modalWindow) {
             NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
             NSString *key = event.charactersIgnoringModifiers.lowercaseString;
@@ -127,7 +132,7 @@ static char webNavigationContext;
 @property NSString *address;
 @property CFTimeInterval followed;
 @property BOOL sawLoading;
-@property CALayer *caption;
+@property CALayer *caption, *bar;
 @property NSInteger preset;
 @end
 @implementation Tile
@@ -215,22 +220,52 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 @property BOOL interactive;
 @property NSArray<NSValue *> *viewports;
 @property NSArray<NSString *> *titles;
+@property(weak) Tile *selected;
+@property BOOL bars;
 @property Tile *held;
 @property BOOL lifted;
 @property NSPoint grip;
-@property NSRect home, foot;
+@property NSRect home, foot, barHome;
 @property NSInteger slot;
 @property CALayer *marker;
 - (void)arrange;
 - (NSRect)handle:(Tile *)tile;
+- (void)select:(Tile *)tile;
+- (void)showAddresses;
 @end
+static NSString *shortAddress(NSString *address) {
+    if (!address.length || [address isEqual:@"about:blank"]) return @"";
+    NSURLComponents *parts = [NSURLComponents componentsWithString:address];
+    NSRange host = parts.rangeOfHost;
+    if (!parts || host.location == NSNotFound || !host.length) {
+        NSURL *url = [NSURL URLWithString:address];
+        return url.isFileURL && url.lastPathComponent.length ? url.lastPathComponent : address;
+    }
+    NSString *shown = [parts.string substringFromIndex:host.location];
+    BOOL bare = [parts.path isEqual:@"/"] && !parts.query && !parts.fragment;
+    return bare && [shown hasSuffix:@"/"] ? [shown substringToIndex:shown.length - 1] : shown;
+}
+static CGColorRef captionColor(BOOL selected) {
+    return (selected ? [NSColor colorWithSRGBRed:0 green:.4 blue:.9 alpha:.92] : [NSColor colorWithWhite:0 alpha:.55]).CGColor;
+}
 @implementation Surface
+- (void)select:(Tile *)tile {
+    self.selected = tile;
+    [CATransaction begin];
+    [CATransaction setDisableActions:reducedMotion()];
+    [CATransaction setAnimationDuration:.16];
+    for (Tile *each in self.subviews) each.caption.backgroundColor = captionColor(each == tile && self.bars);
+    [CATransaction commit];
+}
 - (NSView *)hitTest:(NSPoint)point {
     if (!self.interactive) return nil;
     NSPoint local = [self convertPoint:point fromView:self.superview];
     for (Tile *tile in self.subviews)
-        if (NSPointInRect(local, [self handle:tile])) return self;
+        if (NSPointInRect(local, [self handle:tile]) || NSPointInRect(local, [self barRect:tile])) return self;
     return [super hitTest:point];
+}
+- (NSRect)barRect:(Tile *)tile {
+    return self.bars && tile.bar && !tile.bar.hidden ? NSInsetRect(tile.bar.frame, 0, -2) : NSZeroRect;
 }
 - (void)resizeSubviewsWithOldSize:(NSSize)size {
     [self arrange];
@@ -241,11 +276,15 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     return usable ? NSInsetRect((live ?: tile.caption).frame, -6, -3) : NSZeroRect;
 }
 - (void)resetCursorRects {
-    for (Tile *tile in self.subviews)
+    for (Tile *tile in self.subviews) {
         [self addCursorRect:[self handle:tile] cursor:NSCursor.openHandCursor];
+        [self addCursorRect:[self barRect:tile] cursor:NSCursor.IBeamCursor];
+    }
 }
 - (void)mouseDown:(NSEvent *)event {
     NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    for (Tile *tile in self.subviews)
+        if (NSPointInRect(point, [self barRect:tile])) return editAddress(tile);
     for (Tile *tile in self.subviews)
         if (NSPointInRect(point, [self handle:tile])) self.held = tile;
     if (!self.held) return [super mouseDown:event];
@@ -253,6 +292,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     self.slot = -1;
     self.home = self.held.frame;
     self.foot = self.held.caption.frame;
+    self.barHome = self.held.bar.frame;
 }
 - (void)mouseDragged:(NSEvent *)event {
     Tile *tile = self.held;
@@ -262,7 +302,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     if (!self.lifted) {
         if (hypot(dx, dy) < 4) return;
         self.lifted = YES;
-        for (Tile *other in self.subviews) other.layer.zPosition = other.caption.zPosition = other == tile;
+        for (Tile *other in self.subviews) other.layer.zPosition = other.caption.zPosition = other.bar.zPosition = other == tile;
         CALayer *live = [tile.layer animationForKey:@"settle"] ? tile.layer.presentationLayer : nil;
         CATransform3D start = (live ?: tile.layer).transform;
         [tile.layer removeAnimationForKey:@"settle"];
@@ -276,6 +316,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     [CATransaction setDisableActions:YES];
     [tile setFrameOrigin:NSMakePoint(NSMinX(self.home) + dx, NSMinY(self.home) + dy)];
     tile.caption.frame = NSOffsetRect(self.foot, dx, dy);
+    tile.bar.frame = NSOffsetRect(self.barHome, dx, dy);
     [CATransaction commit];
     [self markSlotNear:NSMakePoint(NSMidX(self.home) + dx, NSMidY(self.home) + dy)];
     [self.window invalidateShadow];
@@ -294,8 +335,10 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     for (Tile *each in tiles) {
         CALayer *live = each.layer.animationKeys.count ? each.layer.presentationLayer : nil;
         CALayer *label = [each.caption animationForKey:@"settle"] ? each.caption.presentationLayer : nil;
+        CALayer *bar = [each.bar animationForKey:@"settle"] ? each.bar.presentationLayer : nil;
         [before addObject:[NSValue valueWithRect:(live ?: each.layer).frame]];
         [before addObject:[NSValue valueWithPoint:(label ?: each.caption).position]];
+        [before addObject:[NSValue valueWithPoint:(bar ?: each.bar).position]];
     }
     if (slot >= 0) moveViewport(from, slot > (NSInteger)from ? slot - 1 : slot);
     else [self arrange];
@@ -304,12 +347,15 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     [CATransaction begin];
     [CATransaction setCompletionBlock:^{ [self.window invalidateShadow]; }];
     for (NSUInteger i = 0; i < tiles.count; i++) {
-        CALayer *layer = tiles[i].layer, *caption = tiles[i].caption;
-        spring(layer, @"transform", [NSValue valueWithCATransform3D:shown(layer, before[i * 2].rectValue)],
+        CALayer *layer = tiles[i].layer;
+        spring(layer, @"transform", [NSValue valueWithCATransform3D:shown(layer, before[i * 3].rectValue)],
                [NSValue valueWithCATransform3D:layer.transform], @"settle");
-        NSPoint was = before[i * 2 + 1].pointValue, now = caption.position;
-        spring(caption, @"position", [NSValue valueWithPoint:NSMakePoint(was.x - now.x, was.y - now.y)],
-               [NSValue valueWithPoint:NSZeroPoint], @"settle");
+        NSArray<CALayer *> *feet = tiles[i].bar ? @[tiles[i].caption, tiles[i].bar] : @[tiles[i].caption];
+        for (NSUInteger j = 0; j < feet.count; j++) {
+            NSPoint was = before[i * 3 + 1 + j].pointValue, now = feet[j].position;
+            spring(feet[j], @"position", [NSValue valueWithPoint:NSMakePoint(was.x - now.x, was.y - now.y)],
+                   [NSValue valueWithPoint:NSZeroPoint], @"settle");
+        }
     }
     [CATransaction commit];
 }
@@ -360,6 +406,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     [CATransaction commit];
 }
 - (void)arrange {
+    stopEditingAddress();
     if (self.held) {
         [self.held.layer removeAnimationForKey:@"lift"];
         self.held = nil;
@@ -375,7 +422,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     rects[0] = self.bounds;
     for (NSUInteger i = 0; i < count; i++)
         sizes[i] = self.viewports[i].sizeValue;
-    if (count) arrangeViewports(sizes, count, self.bounds, 16, 26, rects);
+    if (count) arrangeViewports(sizes, count, self.bounds, 16, self.bars ? 54 : 26, rects);
     for (NSUInteger i = 0; i < MAX(count, 1); i++) {
         Tile *tile = tiles[i];
         NSRect inner = {NSZeroPoint, rects[i].size};
@@ -387,6 +434,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
         tile.page.frame = inner;
         tile.layer.cornerRadius = count ? 16 * NSWidth(inner) / NSWidth(rects[i]) : 0;
         [self caption:tile text:count ? self.titles[i] : nil under:rects[i]];
+        [self bar:tile under:rects[i] shown:count && self.bars];
     }
     [self.window invalidateShadow];
     [self.window invalidateCursorRectsForView:self];
@@ -394,7 +442,6 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 - (void)caption:(Tile *)tile text:(NSString *)text under:(NSRect)rect {
     if (!tile.caption) {
         tile.caption = [CALayer layer];
-        tile.caption.backgroundColor = [NSColor colorWithWhite:0 alpha:.55].CGColor;
         tile.caption.cornerRadius = 10;
         [tile.caption addSublayer:[CATextLayer layer]];
         [self.layer addSublayer:tile.caption];
@@ -411,12 +458,56 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     CGFloat width = ceil(size.width) + 16;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    tile.caption.backgroundColor = captionColor(tile == self.selected && self.bars);
     label.string = [[NSAttributedString alloc] initWithString:shown attributes:style];
     label.contentsScale = self.window.backingScaleFactor ?: 2;
     label.frame = CGRectMake(8, round((20 - ceil(size.height)) / 2), ceil(size.width), ceil(size.height));
     tile.caption.frame = CGRectMake(round(NSMidX(rect) - width / 2), NSMinY(rect) - 26, width, 20);
     tile.caption.hidden = !text || width > NSWidth(rect);
     [CATransaction commit];
+}
+- (void)bar:(Tile *)tile under:(NSRect)rect shown:(BOOL)shown {
+    if (!shown && !tile.bar) return;
+    if (!tile.bar) {
+        CALayer *bar = tile.bar = [CALayer layer];
+        bar.cornerRadius = 11;
+        bar.backgroundColor = [NSColor colorWithWhite:0 alpha:.55].CGColor;
+        bar.borderColor = [NSColor colorWithWhite:1 alpha:.16].CGColor;
+        bar.borderWidth = 1;
+        CATextLayer *text = [CATextLayer layer];
+        text.truncationMode = kCATruncationEnd;
+        text.alignmentMode = kCAAlignmentCenter;
+        text.font = (__bridge CFTypeRef)[NSFont systemFontOfSize:11];
+        text.fontSize = 11;
+        [bar addSublayer:text];
+        [self.layer addSublayer:bar];
+    }
+    CGFloat width = MIN(NSWidth(rect), 420);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    tile.bar.frame = CGRectMake(round(NSMidX(rect) - width / 2), NSMinY(rect) - 52, width, 22);
+    tile.bar.hidden = !shown || width < 80;
+    CATextLayer *text = (CATextLayer *)tile.bar.sublayers.firstObject;
+    text.frame = CGRectMake(10, 4, width - 20, 14);
+    text.contentsScale = self.window.backingScaleFactor ?: 2;
+    [CATransaction commit];
+    [self showAddress:tile];
+}
+- (void)showAddress:(Tile *)tile {
+    if (!tile.bar || tile.bar.hidden) return;
+    NSString *address = shortAddress(tile.page.address.length ? tile.page.address : tile.address);
+    BOOL empty = !address.length;
+    CATextLayer *text = (CATextLayer *)tile.bar.sublayers.firstObject;
+    NSString *string = empty ? @"Search or enter URL" : address;
+    if ([string isEqual:text.string]) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    text.string = string;
+    text.foregroundColor = [NSColor colorWithWhite:1 alpha:empty ? .55 : .92].CGColor;
+    [CATransaction commit];
+}
+- (void)showAddresses {
+    for (Tile *tile in self.subviews) [self showAddress:tile];
 }
 - (void)add:(NSView<BrowPage> *)page {
     Tile *tile = [[Tile alloc] initWithFrame:self.bounds];
@@ -432,6 +523,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 - (void)drop:(Tile *)tile {
     [tile.page dispose];
     [tile.caption removeFromSuperlayer];
+    [tile.bar removeFromSuperlayer];
     [tile removeFromSuperview];
 }
 - (void)discard:(NSUInteger)keep {
@@ -467,6 +559,11 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 @property NSArray<NSTextField *> *quickFields;
 @property NSArray<NSNumber *> *viewports;
 - (void)syncViewports;
+- (void)syncPillNavigation:(NSNotification *)note;
+- (void)editViewportAddress:(Tile *)tile;
+- (void)endViewportEditing;
+@property NSTextField *barEditor;
+@property(weak) Tile *editedTile;
 - (void)moveViewport:(NSUInteger)from to:(NSUInteger)to;
 - (void)positionPill;
 - (void)applyFields:(NSArray<NSTextField *> *)fields centre:(BOOL)centre;
@@ -505,11 +602,52 @@ static BOOL reducedMotion(void) {
 static NSView<BrowPage> *page(void) { return app.pages[@(brow_current())]; }
 static Surface *surfaceOf(NSView<BrowPage> *p) { return (Surface *)p.superview.superview; }
 static NSArray<NSView<BrowPage> *> *currentPages(void) { return [surfaceOf(page()).subviews valueForKey:@"page"]; }
+static BOOL separatePages(void) { return [NSUserDefaults.standardUserDefaults boolForKey:@"isolateViewports"]; }
+static NSArray<Tile *> *targetTiles(void) {
+    NSArray<Tile *> *tiles = surfaceOf(page()).subviews;
+    return separatePages() && tiles.count > 1 ? @[(Tile *)page().superview] : tiles;
+}
+static BOOL blank(Tile *tile) {
+    NSString *address = tile.page.address;
+    return !tile.address.length && (!address.length || [address isEqual:@"about:blank"]);
+}
 static void navigate(NSString *address) {
-    for (Tile *tile in surfaceOf(page()).subviews) [tile follow:address];
+    NSArray<Tile *> *tiles = targetTiles(), *all = surfaceOf(page()).subviews;
+    BOOL fresh = YES;
+    for (Tile *tile in all) fresh &= blank(tile);
+    for (Tile *tile in fresh ? all : tiles) [tile follow:address];
+}
+static void chooseViewport(NSEvent *event) {
+    Surface *surface = surfaceOf(page());
+    if (!app || event.window != app.window || app.overlay || !separatePages() || surface.subviews.count < 2) return;
+    NSPoint point = [surface convertPoint:event.locationInWindow fromView:nil];
+    BOOL ended = app.editedTile && !NSPointInRect(point, [surface barRect:app.editedTile]), onBar = NO;
+    if (ended) [app endViewportEditing];
+    for (Tile *tile in surface.subviews) onBar |= NSPointInRect(point, [surface barRect:tile]);
+    for (Tile *tile in surface.subviews) {
+        if (tile.page == page() || !(NSPointInRect(point, tile.frame) || NSPointInRect(point, [surface handle:tile]))) continue;
+        app.pages[@(brow_current())] = tile.page;
+        [surface select:tile];
+        [app syncPillNavigation:nil];
+        break;
+    }
+    if (ended && !onBar) [page() focus];
+}
+static void editAddress(Tile *tile) {
+    if (tile == app.editedTile && app.barEditor.superview) return;
+    Surface *surface = (Surface *)tile.superview;
+    app.pages[@(brow_current())] = tile.page;
+    [surface select:tile];
+    [app syncPillNavigation:nil];
+    [app editViewportAddress:tile];
+}
+static void stopEditingAddress(void) {
+    if (!app.barEditor.superview) return;
+    [app endViewportEditing];
+    [page() focus];
 }
 static void command(SEL action) {
-    for (Tile *tile in surfaceOf(page()).subviews) {
+    for (Tile *tile in targetTiles()) {
         NSView<BrowPage> *p = tile.page;
         BOOL able = action == @selector(goBack) ? p.canGoBack : action == @selector(goForward) ? p.canGoForward : p.address.length > 0;
         if (!able) continue;
@@ -1015,12 +1153,13 @@ static NSString *selectedIcon(void) {
 }
 - (void)controlTextDidEndEditing:(NSNotification *)note {
     if (note.object == self.pillEditor) { [self endPillEditing]; return; }
+    if (note.object == self.barEditor) { [self endViewportEditing]; return; }
     if ([self.geometryFields containsObject:note.object] || [self.quickFields containsObject:note.object]) {
         dispatch_async(dispatch_get_main_queue(), ^{ [self syncGeometryFields]; });
     }
 }
 - (void)controlTextDidChange:(NSNotification *)note {
-    if (note.object == self.pillEditor) return;
+    if (note.object == self.pillEditor || note.object == self.barEditor) return;
     if ([self.geometryFields containsObject:note.object] || [self.quickFields containsObject:note.object]) {
         [self applyFields:[self.quickFields containsObject:note.object] ? self.quickFields : self.geometryFields centre:NO];
         return;
@@ -1029,6 +1168,22 @@ static NSString *selectedIcon(void) {
     [self filter:self.field.stringValue];
 }
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)editor doCommandBySelector:(SEL)sel {
+    if (control == self.barEditor) {
+        if (sel != @selector(insertNewline:) && sel != @selector(cancelOperation:) && sel != @selector(insertTab:) &&
+            sel != @selector(insertBacktab:)) return NO;
+        NSString *input = editor.string.copy;
+        Tile *tile = self.editedTile;
+        [self endViewportEditing];
+        if (sel == @selector(insertNewline:) && input.length) {
+            char *destination = brow_destination(input.UTF8String);
+            if (destination) {
+                [tile follow:@(destination)];
+                brow_free(destination);
+            }
+        }
+        [tile.page focus];
+        return YES;
+    }
     if (control == self.pillEditor) {
         if (sel != @selector(insertNewline:) && sel != @selector(cancelOperation:)) return NO;
         NSString *input = editor.string.copy;

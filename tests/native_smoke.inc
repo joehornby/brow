@@ -97,8 +97,28 @@ static void focusSettingsTest(BOOL useChromium) {
     [app toggleFocus:nil];
 }
 static BOOL near(CGFloat a, CGFloat b) { return fabs(a-b)<=1; }
+static BOOL drawsText(CALayer *layer) {
+    NSInteger w=CGRectGetWidth(layer.bounds)*2, h=CGRectGetHeight(layer.bounds)*2, bright=0;
+    NSBitmapImageRep *rep=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:w pixelsHigh:h bitsPerSample:8
+        samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+    CGContextRef c=[NSGraphicsContext graphicsContextWithBitmapImageRep:rep].CGContext;
+    CGContextSetRGBFillColor(c,0,0,0,1);
+    CGContextFillRect(c,CGRectMake(0,0,w,h));
+    CGContextScaleCTM(c,2,2);
+    [layer renderInContext:c];
+    for (NSInteger x=0;x<w;x++)
+        for (NSInteger y=0;y<h;y++) bright+=[rep colorAtX:x y:y].brightnessComponent>.6;
+    return bright>20;
+}
 static void viewportsTest(BOOL useChromium) {
     [app dismiss];
+    check([shortAddress(@"http://[::1]:5173/app") isEqual:@"[::1]:5173/app"] &&
+          [shortAddress(@"https://example.com:08080/") isEqual:@"example.com:08080"] &&
+          [shortAddress(@"https://user:pw@example.com/a?b=1#c") isEqual:@"example.com/a?b=1#c"] &&
+          [shortAddress(@"file:///Users/x/proto.html") isEqual:@"proto.html"] &&
+          [shortAddress(@"data:text/html,x") isEqual:@"data:text/html,x"] && [shortAddress(@"about:blank") isEqual:@""],
+          "address bars shorten addresses");
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"isolateViewports"];
     if (useChromium) check(brow_new(true,true),"Chromium viewports test");
     [page() navigate:@"data:text/html,<body%20style='background:teal'><script>c='';onclick=e=>c='%20'+e.clientX+','+e.clientY;setInterval(()=>document.title=innerWidth+'x'+innerHeight+c,50)</script>"];
     NSButton *open=prefsButton(app.pill.contentView,@selector(showViewports:),NSNotFound);
@@ -233,16 +253,130 @@ static void viewportsTest(BOOL useChromium) {
         mouse(NSEventTypeLeftMouseDown,0,0);
         mouse(NSEventTypeLeftMouseUp,0,0);
         check([app.viewports isEqual:chosen],"a click on a caption does not move a viewport");
-        toggle(@[@0]);
-        check(surface.subviews.count==2 && surface.subviews[0]==second && surface.subviews[1]==third && page()==second.page,
-              "a cleared viewport leaves the other viewports and their pages in place");
-        toggle(@[@1,@4]);
-        check(surface.subviews.count==1 && NSEqualRects(surface.subviews[0].frame,surface.bounds) &&
-              NSEqualSizes(page().bounds.size,app.deck.bounds.size) && surface.subviews[0].layer.cornerRadius==0 &&
-              ((Tile *)surface.subviews[0]).caption.hidden &&
-              CGColorGetAlpha(app.window.contentView.layer.backgroundColor)==1 && app.window.contentView.layer.cornerRadius==24,
-              "no viewports restores the full page");
-        shortcut(@"q");
+        NSButton *(^syncBox)(void)=^{ return prefsButton(app.toolPopover.contentViewController.view,@selector(toggleViewportSync:),NSNotFound); };
+        [open performClick:nil];
+        [syncBox() performClick:nil];
+        [app.toolPopover close];
+        check(page()==second.page && surface.selected==second,"a different page in each viewport selects one viewport");
+        NSPoint inside=[surface convertPoint:NSMakePoint(NSMidX(first.frame),NSMidY(first.frame)) toView:nil];
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:inside modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        check(page()==first.page && surface.selected==first &&
+              CGColorEqualToColor(first.caption.backgroundColor,captionColor(YES)) &&
+              CGColorEqualToColor(second.caption.backgroundColor,captionColor(NO)),"a click in a viewport selects it");
+        check(surface.bars && !first.bar.hidden && !second.bar.hidden && !third.bar.hidden &&
+              CGRectGetMaxY(first.bar.frame)<CGRectGetMinY(first.caption.frame),"an address bar shows under each viewport");
+        check(drawsText(first.bar) && drawsText(second.bar) && drawsText(third.bar),"each address bar shows its address");
+        NSPoint barPoint=[surface convertPoint:NSMakePoint(CGRectGetMidX(second.bar.frame),CGRectGetMidY(second.bar.frame)) toView:nil];
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:barPoint modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        NSTextView *barEditor=(NSTextView *)app.barEditor.currentEditor;
+        check(page()==second.page && app.barEditor.superview && barEditor,"a click on an address bar edits that viewport");
+        check(!app.barEditor.cell.wraps && app.barEditor.cell.scrollable && NSMinX(barEditor.superview.bounds)>0,
+              "a long address stays on one line and shows its end");
+        [barEditor doCommandBySelector:@selector(cancelOperation:)];
+        check(!app.barEditor.superview && [second.address containsString:@"id=second"],"Escape cancels a viewport address edit");
+        barPoint=[surface convertPoint:NSMakePoint(CGRectGetMidX(first.bar.frame),CGRectGetMidY(first.bar.frame)) toView:nil];
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:barPoint modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        barEditor=(NSTextView *)app.barEditor.currentEditor;
+        check(page()==first.page && barEditor,"the address bar edits the viewport under it");
+        NSPoint gap=[surface convertPoint:NSMakePoint(NSMidX(surface.bounds),NSMaxY(surface.bounds)-40) toView:nil];
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:gap modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        check(!app.barEditor.superview && page()==first.page && app.window.firstResponder!=app.window,
+              "a click outside the address bar ends the edit and gives focus back to the page");
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:barPoint modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        [app.window setFrame:NSInsetRect(app.window.frame,10,10) display:YES];
+        check(!app.barEditor.superview,"resizing the window ends the edit");
+        for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:
+                [surface convertPoint:NSMakePoint(CGRectGetMidX(first.bar.frame),CGRectGetMidY(first.bar.frame)) toView:nil]
+                modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        barEditor=(NSTextView *)app.barEditor.currentEditor;
+        check(barEditor!=nil,"the address bar edits again after a resize");
+        [barEditor insertText:@"127.0.0.1:9/own" replacementRange:NSMakeRange(0,barEditor.string.length)];
+        [barEditor doCommandBySelector:@selector(insertNewline:)];
+        check(!app.barEditor.superview && [first.address containsString:@"127.0.0.1:9/own"] &&
+              [second.address containsString:@"id=second"] && [third.address containsString:@"id=second"],
+              "Return in an address bar loads only that viewport");
+        navigate(@"data:text/html,<body%20id=own>");
+        check([first.address containsString:@"id=own"] && [second.address containsString:@"id=second"] &&
+              [third.address containsString:@"id=second"],
+              "the address field loads only the selected viewport");
+        NSDate *loaded=[NSDate dateWithTimeIntervalSinceNow:20];
+        [NSTimer scheduledTimerWithTimeInterval:.1 repeats:YES block:^(NSTimer *wait) {
+            check(loaded.timeIntervalSinceNow>0,"the selected viewport loads its own page");
+            if (![first.page.address containsString:@"id=own"]) return;
+            [wait invalidate];
+            check([second.page.address containsString:@"id=second"] && [third.page.address containsString:@"id=second"],
+                  "the other viewports keep their pages");
+            [app togglePill:nil];
+            check(!surface.bars && first.bar.hidden && second.bar.hidden && third.bar.hidden && !first.caption.hidden,
+                  "hiding the toolbar hides the address bars");
+            [app togglePill:nil];
+            check(surface.bars && !first.bar.hidden,"showing the toolbar shows the address bars");
+            Tile *lead=(Tile *)page().superview;
+            NSRect barWas=lead.bar.frame;
+            NSPoint hold=NSMakePoint(CGRectGetMidX(lead.caption.frame),CGRectGetMidY(lead.caption.frame));
+            void (^drag)(NSEventType,CGFloat)=^(NSEventType type,CGFloat d) {
+                [NSApp sendEvent:[NSEvent mouseEventWithType:type location:[surface convertPoint:NSMakePoint(hold.x+d,hold.y+d) toView:nil]
+                    modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                    context:nil eventNumber:1 clickCount:1 pressure:1]];
+            };
+            drag(NSEventTypeLeftMouseDown,0);
+            drag(NSEventTypeLeftMouseDragged,12);
+            check(near(CGRectGetMinX(lead.bar.frame),CGRectGetMinX(barWas)+12) && near(CGRectGetMinY(lead.bar.frame),CGRectGetMinY(barWas)+12),
+                  "an address bar moves with its viewport");
+            drag(NSEventTypeLeftMouseUp,12);
+            check(page()==lead.page && CGRectEqualToRect(lead.bar.frame,barWas),"an address bar settles under its viewport");
+            [app newTab:nil];
+            [app dismiss];
+            Surface *opened=surfaceOf(page());
+            check(opened!=surface && opened.subviews.count==3 && opened.bars,"a new tab has a viewport for each selection");
+            navigate(@"data:text/html,<body%20id=fresh>");
+            BOOL everywhere=YES;
+            for (Tile *tile in opened.subviews) everywhere&=[tile.address containsString:@"id=fresh"];
+            check(everywhere,"a new tab loads its address in every viewport");
+            navigate(@"data:text/html,<body%20id=later>");
+            check([((Tile *)page().superview).address containsString:@"id=later"] &&
+                  [((Tile *)opened.subviews.lastObject).address containsString:@"id=fresh"],
+                  "after the first load the address field loads only the selected viewport");
+            brow_close_tab();
+            check(surfaceOf(page())==surface && page()==lead.page,"closing the new tab returns to the selected viewport");
+            [open performClick:nil];
+            [syncBox() performClick:nil];
+            [app.toolPopover close];
+            check(!surface.selected && page()==second.page,"the same page in all viewports clears the selection");
+            NSDate *followed=[NSDate dateWithTimeIntervalSinceNow:20];
+            [NSTimer scheduledTimerWithTimeInterval:.1 repeats:YES block:^(NSTimer *all) {
+                check(followed.timeIntervalSinceNow>0,"the same page in all viewports loads the selected page everywhere");
+                if (![second.page.address containsString:@"id=own"] || ![third.page.address containsString:@"id=own"]) return;
+                [all invalidate];
+                toggle(@[@0]);
+                check(surface.subviews.count==2 && surface.subviews[0]==second && surface.subviews[1]==third && page()==second.page,
+                      "a cleared viewport leaves the other viewports and their pages in place");
+                toggle(@[@1,@4]);
+                check(surface.subviews.count==1 && NSEqualRects(surface.subviews[0].frame,surface.bounds) &&
+                      NSEqualSizes(page().bounds.size,app.deck.bounds.size) && surface.subviews[0].layer.cornerRadius==0 &&
+                      ((Tile *)surface.subviews[0]).caption.hidden &&
+                      CGColorGetAlpha(app.window.contentView.layer.backgroundColor)==1 && app.window.contentView.layer.cornerRadius==24,
+                      "no viewports restores the full page");
+                shortcut(@"q");
+            }];
+        }];
     }];
 }
 static void smoke(void) {
