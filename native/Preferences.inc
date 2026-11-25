@@ -251,7 +251,7 @@ static NSArray *siteGradient(NSImage *image) {
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         self.preferences.releasedWhenClosed = NO;
-        self.preferences.collectionBehavior = NSWindowCollectionBehaviorFullScreenAuxiliary;
+        self.preferences.collectionBehavior = NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorMoveToActiveSpace;
         self.preferences.toolbarStyle = NSWindowToolbarStylePreference;
         NSToolbar *toolbar = [[NSToolbar alloc] initWithIdentifier:@"BrowPreferences"];
         toolbar.delegate = self;

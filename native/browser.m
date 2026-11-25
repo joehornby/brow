@@ -135,7 +135,7 @@ static char webNavigationContext;
 }
 @end
 
-@interface Browser : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, NSToolbarDelegate>
+@interface Browser : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, NSToolbarDelegate, NSPopoverDelegate>
 @property NSWindow *window;
 @property BOOL inFullScreen, focusTransition;
 @property NSView *deck;
