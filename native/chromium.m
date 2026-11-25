@@ -107,6 +107,15 @@ static NSString *take_string(cef_string_userfree_t s) {
     cef_string_userfree_free(s);
     return out;
 }
+static void commandLine(cef_app_t *s, const cef_string_t *type, cef_command_line_t *line) {
+    if (!type || !type->length) {
+        cef_string_t name = string(@"autoplay-policy"), value = string(@"no-user-gesture-required");
+        line->append_switch_with_value(line, &name, &value);
+        cef_string_clear(&name);
+        cef_string_clear(&value);
+    }
+    DROP(line);
+}
 static bool start(void) {
     if (running)
         return true;
@@ -116,6 +125,7 @@ static bool start(void) {
     process.on_schedule_message_pump_work = schedule;
     application.base = permanent(sizeof(application));
     application.get_browser_process_handler = get_process;
+    application.on_before_command_line_processing = commandLine;
     life.base = permanent(sizeof(life));
     life.on_before_popup = popup;
     life.on_after_created = created;

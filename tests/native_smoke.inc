@@ -67,6 +67,7 @@ static void focusSettingsTest(BOOL useChromium) {
         check(NSContainsRect(app.window.frame, NSInsetRect(screen.visibleFrame, 1, 1)), "Focus covers the usable screen");
         check(app.focusMode && NSEqualSizes(app.deck.frame.size,original.size),"full-screen page preserves dimensions");
         check(fabs(NSMidX(app.deck.frame)-NSMidX(app.window.contentView.bounds))<=1,"centered focus page");
+        [app settings:nil];
         __block BOOL changedPage=NO;
         NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:15];
         [NSTimer scheduledTimerWithTimeInterval:.1 repeats:YES block:^(NSTimer *timer) {
@@ -81,6 +82,7 @@ static void focusSettingsTest(BOOL useChromium) {
                 [page() navigate:@"data:text/html,<title>Warm</title><body%20style='background:coral'>"];
             } else if (changedPage && color.redComponent-color.greenComponent>.12) {
                 check(reduce || [app.backdrop animationForKey:@"siteColors"].duration==14,"slow retarget after navigation");
+                check(app.preferences.isOnActiveSpace && app.window.isOnActiveSpace,"settings open on the Focus Space");
                 [timer invalidate]; [app toggleFocus:nil];
             } else check(deadline.timeIntervalSinceNow>0,"gradient follows rendered page colours");
         }];
@@ -119,10 +121,16 @@ static void smoke(void) {
         [editor doCommandBySelector:@selector(insertTab:)];
         check(app.quickFields[1].currentEditor != nil, "popover tab order");
         [app.toolPopover close];
-        [prefsButton(controls, @selector(windowSettings:), NSNotFound) performClick:nil];
+        check(app.pill.firstResponder == app.pill, "closed popover leaves no editor in the toolbar panel");
+        check(!prefsButton(controls, @selector(windowSettings:), NSNotFound) && !prefsButton(controls, @selector(fillWindow:), NSNotFound) &&
+              !prefsButton(controls, @selector(toggleFullScreen:), NSNotFound), "toolbar omits window settings, fill and full screen");
+        NSButton *hide = prefsButton(controls, @selector(togglePill:), NSNotFound);
+        check(hide.imagePosition == NSImageOnly && NSWidth(hide.frame) == 32, "hide button shows no shortcut text");
+        [geometry performClick:nil];
+        [prefsButton(app.toolPopover.contentViewController.view, @selector(windowSettings:), NSNotFound) performClick:nil];
         check(app.preferences.visible && [app.section isEqual:@"Window"], "window settings deep link");
         [app.preferences close];
-        [prefsButton(controls, @selector(fillWindow:), NSNotFound) performClick:nil];
+        [app fillWindow:nil];
         check(NSEqualRects(app.window.frame, screen) && NSContainsRect(screen, app.pill.frame), "fill keeps toolbar on display");
         [app.window setFrame:NSMakeRect(NSMinX(screen)+20,NSMidY(screen),640,300) display:YES];
         [prefsButton(controls, @selector(centreWindow:), NSNotFound) performClick:nil];
@@ -218,18 +226,18 @@ static void smoke(void) {
     check(brow_count()==2 && app.overlay,"new tab");
     [app dismiss];
     check(brow_new(true,true),"Chromium engine replacement");
-    [page() navigate:@"data:text/html,<meta%20name=theme-color%20content=coral><title>Chromium%20test</title><body%20style='background:gold'>"];
+    [page() navigate:@"data:text/html,<meta%20name=theme-color%20content=coral><title>Chromium%20test</title><body%20style='background:gold'><script>let%20c=new%20AudioContext;setInterval(()=>{if(c.state=='running')document.title='Chromium%20autoplay'},20)</script>"];
     NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:12];
     [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
         BOOL webkitReady=[app.pages[@(brow_id(0))].pageTitle isEqual:@"WebKit test"];
-        if ((webkitReady && [page().pageTitle isEqual:@"Chromium test"]) || deadline.timeIntervalSinceNow <= 0) {
+        if ((webkitReady && [page().pageTitle isEqual:@"Chromium autoplay"]) || deadline.timeIntervalSinceNow <= 0) {
             [timer invalidate]; verifySwitches();
         }
     }];
 }
 static void verifySwitches(void) {
 
-    check([page().pageTitle isEqual:@"Chromium test"],"Chromium rendered the document");
+    check([page().pageTitle isEqual:@"Chromium autoplay"],"Chromium rendered the document and permits autoplay with sound");
     shortcut(@"1");
     check([page().pageTitle isEqual:@"WebKit test"],"WebKit document survives switching");
     CALayer *layer=page().superview.layer;

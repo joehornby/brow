@@ -14,7 +14,7 @@ Press **⌘L** to open the larger address and tab palette, even while the pill i
 
 ## Set the frame
 
-Brow opens centred at **1200 × 800 points**, or as large as the display allows. Click the sliders in the floating toolbar to set the width, height, and position. Edits take effect as you type, so you can find a responsive breakpoint while the prototype is running. Press **⌥⌘C** to centre the result. Drag near the top edge, or hold **Option** and drag anywhere on the page.
+Brow opens centred at **1200 × 800 points**, or as large as the display allows. Click the resize icon in the floating toolbar to set the width, height, and position. Edits take effect as you type, so you can find a responsive breakpoint while the prototype is running. Press **⌥⌘C** to centre the result. Drag near the top edge, or hold **Option** and drag anywhere on the page.
 
 ## Present at that size
 

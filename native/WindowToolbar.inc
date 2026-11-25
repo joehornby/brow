@@ -1,5 +1,5 @@
 - (void)buildPill {
-    NSRect bounds = NSMakeRect(0, 0, 626, 42);
+    NSRect bounds = NSMakeRect(0, 0, 488, 42);
     self.pill = [[PillPanel alloc] initWithContentRect:bounds
         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
         backing:NSBackingStoreBuffered defer:NO];
@@ -33,19 +33,16 @@
         @[@"Forward", @"chevron.right", @"forward:"],
         @[@"Reload", @"arrow.clockwise", @"refresh:"],
         @[@"Edit address", @"magnifyingglass", @"editPillAddress:"],
-        @[@"Settings", @"gearshape", @"settings:"],
-        @[@"Window Settings", @"macwindow", @"windowSettings:"],
-        @[@"Window size and position", @"slider.horizontal.3", @"quickGeometry:"],
+        @[@"Window size and position", @"square.resize", @"quickGeometry:"],
         @[@"Focus mode", @"viewfinder", @"toggleFocus:"],
-        @[@"Fill screen", @"rectangle.inset.filled", @"fillWindow:"],
-        @[@"Full screen", @"arrow.up.left.and.arrow.down.right", @"toggleFullScreen:"],
         @[@"Centre on screen", @"scope", @"centreWindow:"],
+        @[@"Settings", @"gearshape", @"settings:"],
         @[@"Shortcuts", @"keyboard", @"showShortcuts:"],
         @[@"Hide toolbar", @"eye.slash", @"togglePill:"]
     ];
     CGFloat x = 8;
     for (NSUInteger i = 0; i < commands.count; i++) {
-        if (i == 4 || i == 7 || i == 11) {
+        if (i == 4 || i == 7) {
             NSBox *divider = [[NSBox alloc] initWithFrame:NSMakeRect(x + 3, 13, 1, 16)];
             divider.boxType = NSBoxSeparator;
             [controls addSubview:divider];
@@ -53,8 +50,9 @@
         }
         NSArray *command = commands[i];
         SEL action = NSSelectorFromString(command[2]);
-        NSButton *button = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:command[1]
-            accessibilityDescription:command[0]] target:action == @selector(toggleFullScreen:) ? self.window : self action:action];
+        NSImage *image = [NSImage imageWithSystemSymbolName:command[1] accessibilityDescription:command[0]]
+            ?: [NSImage imageWithSystemSymbolName:@"macwindow" accessibilityDescription:command[0]];
+        NSButton *button = [NSButton buttonWithImage:image target:self action:action];
         button.bezelStyle = NSBezelStyleAccessoryBarAction;
         button.showsBorderOnlyWhileMouseInside = YES;
         [button addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
@@ -71,13 +69,6 @@
             button.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
             button.imagePosition = NSImageLeft;
             button.lineBreakMode = NSLineBreakByTruncatingTail;
-        }
-        if (action == @selector(togglePill:)) {
-            button.title = @"⌘\\";
-            button.imagePosition = NSImageLeft;
-            button.font = [NSFont systemFontOfSize:10 weight:NSFontWeightMedium];
-            button.contentTintColor = NSColor.secondaryLabelColor;
-            button.frame = NSMakeRect(x, 5, 66, 32);
         }
         [controls addSubview:button];
         x += NSWidth(button.frame);
@@ -146,8 +137,8 @@
 }
 - (void)showPillTip:(NSButton *)button {
     if (button != self.tipAnchor || !self.pill.visible || !NSApp.active || self.toolPopover.shown) return;
-    NSDictionary *keys = @{@"back:": @"⌘[", @"forward:": @"⌘]", @"refresh:": @"⌘R", @"settings:": @"⌘,", @"toggleFocus:": @"⇧⌘F", @"fillWindow:": @"⌥⌘F",
-        @"toggleFullScreen:": @"⌃⌘F", @"centreWindow:": @"⌥⌘C", @"togglePill:": @"⌘\\"};
+    NSDictionary *keys = @{@"back:": @"⌘[", @"forward:": @"⌘]", @"refresh:": @"⌘R", @"settings:": @"⌘,", @"toggleFocus:": @"⇧⌘F",
+        @"centreWindow:": @"⌥⌘C", @"togglePill:": @"⌘\\"};
     NSView *body = [NSView new];
     body.wantsLayer = YES;
     body.layer.backgroundColor = [NSColor colorWithWhite:.13 alpha:.97].CGColor;
@@ -186,14 +177,12 @@
     for (NSView *view in self.pillControls.subviews) {
         if (![view isKindOfClass:NSButton.class]) continue;
         NSButton *button = (NSButton *)view;
-        if (button.action == @selector(centreWindow:) || button.action == @selector(fillWindow:))
+        if (button.action == @selector(centreWindow:))
             button.enabled = !self.inFullScreen;
         if (button.action == @selector(toggleFocus:)) {
             button.enabled = !self.inFullScreen || self.focusMode;
             button.accessibilityLabel = self.focusMode ? @"Exit focus mode" : @"Focus mode";
         }
-        if (button.action == @selector(toggleFullScreen:))
-            button.accessibilityLabel = self.inFullScreen ? @"Exit full screen" : @"Full screen";
     }
 }
 - (void)attachPill {
@@ -243,7 +232,18 @@
     self.toolPopover.animates = !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
     self.toolPopover.contentViewController = controller;
     self.toolPopover.contentSize = view.frame.size;
+    self.toolPopover.delegate = self;
+    [self.pill makeKeyWindow];
     [self.toolPopover showRelativeToRect:button.bounds ofView:button preferredEdge:NSRectEdgeMaxY];
+}
+- (void)popoverWillClose:(NSNotification *)note {
+    NSResponder *responder = self.pill.firstResponder;
+    if ([responder isKindOfClass:NSView.class] && ((NSView *)responder).window != self.pill)
+        [self.pill makeFirstResponder:nil];
+}
+- (void)popoverDidClose:(NSNotification *)note {
+    if (note.object == self.toolPopover && self.pill.isKeyWindow && (!self.pillEditor || self.pillEditor.hidden) && !self.quitting)
+        [self.window makeKeyWindow];
 }
 - (BOOL)prepareToolFrom:(NSButton *)button {
     BOOL toggleOff = self.toolPopover.shown && self.popoverAnchor == button;
