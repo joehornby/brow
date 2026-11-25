@@ -222,10 +222,15 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 @property NSInteger slot;
 @property CALayer *marker;
 - (void)arrange;
+- (NSRect)handle:(Tile *)tile;
 @end
 @implementation Surface
 - (NSView *)hitTest:(NSPoint)point {
-    return self.interactive ? [super hitTest:point] : nil;
+    if (!self.interactive) return nil;
+    NSPoint local = [self convertPoint:point fromView:self.superview];
+    for (Tile *tile in self.subviews)
+        if (NSPointInRect(local, [self handle:tile])) return self;
+    return [super hitTest:point];
 }
 - (void)resizeSubviewsWithOldSize:(NSSize)size {
     [self arrange];
@@ -287,11 +292,10 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     NSInteger slot = self.slot;
     NSMutableArray<NSValue *> *before = [NSMutableArray array];
     for (Tile *each in tiles) {
-        NSRect f = each.frame;
-        if (each == tile && [each.layer animationForKey:@"lift"])
-            f = NSInsetRect(f, -NSWidth(f) * .012, -NSHeight(f) * .012);
-        [before addObject:[NSValue valueWithRect:f]];
-        [before addObject:[NSValue valueWithPoint:each.caption.position]];
+        CALayer *live = each.layer.animationKeys.count ? each.layer.presentationLayer : nil;
+        CALayer *label = [each.caption animationForKey:@"settle"] ? each.caption.presentationLayer : nil;
+        [before addObject:[NSValue valueWithRect:(live ?: each.layer).frame]];
+        [before addObject:[NSValue valueWithPoint:(label ?: each.caption).position]];
     }
     if (slot >= 0) moveViewport(from, slot > (NSInteger)from ? slot - 1 : slot);
     else [self arrange];
