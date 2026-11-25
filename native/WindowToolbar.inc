@@ -1,5 +1,5 @@
 - (void)buildPill {
-    NSRect bounds = NSMakeRect(0, 0, 488, 42);
+    NSRect bounds = NSMakeRect(0, 0, 520, 42);
     self.pill = [[PillPanel alloc] initWithContentRect:bounds
         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
         backing:NSBackingStoreBuffered defer:NO];
@@ -34,6 +34,7 @@
         @[@"Reload", @"arrow.clockwise", @"refresh:"],
         @[@"Edit address", @"magnifyingglass", @"editPillAddress:"],
         @[@"Window size and position", @"square.resize", @"quickGeometry:"],
+        @[@"Viewports", @"macbook.and.iphone", @"showViewports:"],
         @[@"Focus mode", @"viewfinder", @"toggleFocus:"],
         @[@"Centre on screen", @"scope", @"centreWindow:"],
         @[@"Settings", @"gearshape", @"settings:"],
@@ -42,7 +43,7 @@
     ];
     CGFloat x = 8;
     for (NSUInteger i = 0; i < commands.count; i++) {
-        if (i == 4 || i == 7) {
+        if (i == 4 || i == 8) {
             NSBox *divider = [[NSBox alloc] initWithFrame:NSMakeRect(x + 3, 13, 1, 16)];
             divider.boxType = NSBoxSeparator;
             [controls addSubview:divider];
@@ -100,6 +101,7 @@
 }
 - (void)syncPillNavigation:(NSNotification *)note {
     if (self.quitting) return;
+    [self followNavigation];
     NSView<BrowPage> *current = page();
     if (note.object && note.object != current) return;
     NSString *address = current.address;
@@ -191,6 +193,8 @@
 }
 - (void)positionPill {
     if (!self.pill.parentWindow || !self.window.screen) return;
+    for (SizeSlider *slider in self.quickFields.firstObject.superview.subviews)
+        if ([slider isKindOfClass:SizeSlider.class] && slider.dragging) return;
     NSRect screen = self.inFullScreen ? self.window.screen.frame : self.window.screen.visibleFrame;
     NSRect pageRect = self.focusMode ? [self.window convertRectToScreen:[self.deck convertRect:self.deck.bounds toView:nil]]
                                      : self.window.frame;
@@ -199,6 +203,9 @@
     CGFloat y = NSMinY(pageRect) - 8 - size.height;
     if (y < NSMinY(screen)) y = MAX(NSMinY(screen), NSMinY(pageRect)) + 8;
     [self.pill setFrameOrigin:NSMakePoint(round(x), round(y))];
+    if (!self.toolPopover.shown || !self.popoverAnchor || [self roomyEdge] == self.popoverEdge) return;
+    self.popoverEdge = [self roomyEdge];
+    [self.toolPopover showRelativeToRect:self.popoverAnchor.bounds ofView:self.popoverAnchor preferredEdge:self.popoverEdge];
 }
 - (void)togglePill:(id)sender {
     if (self.focusTransition) return;
@@ -234,7 +241,13 @@
     self.toolPopover.contentSize = view.frame.size;
     self.toolPopover.delegate = self;
     [self.pill makeKeyWindow];
-    [self.toolPopover showRelativeToRect:button.bounds ofView:button preferredEdge:NSRectEdgeMaxY];
+    self.popoverEdge = [self roomyEdge];
+    [self.toolPopover showRelativeToRect:button.bounds ofView:button preferredEdge:self.popoverEdge];
+}
+- (NSRectEdge)roomyEdge {
+    NSRect screen = self.inFullScreen ? self.pill.screen.frame : self.pill.screen.visibleFrame;
+    BOOL fits = NSMinY(self.pill.frame) - NSMinY(screen) >= self.toolPopover.contentSize.height + 24;
+    return fits ? NSRectEdgeMaxY : NSRectEdgeMinY;
 }
 - (void)popoverWillClose:(NSNotification *)note {
     NSResponder *responder = self.pill.firstResponder;
@@ -253,7 +266,7 @@
 }
 - (void)quickGeometry:(NSButton *)button {
     if (![self prepareToolFrom:button]) return;
-    NSView *body = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 482, 150)];
+    NSView *body = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 482, 242)];
     self.quickFields = [self drawGeometry:body];
     NSButton *settings = [NSButton buttonWithTitle:@"Window Settings…" target:self action:@selector(windowSettings:)];
     settings.frame = NSMakeRect(312, 10, 153, 30);

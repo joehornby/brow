@@ -1,5 +1,6 @@
 #import "Page.h"
 #import "FocusColor.h"
+#import "Slider.h"
 #import <CoreImage/CoreImage.h>
 #import <QuartzCore/QuartzCore.h>
 #import <WebKit/WebKit.h>
@@ -56,6 +57,7 @@ static void dismissPillTip(void);
 @end
 
 static void openLink(NSString *url, bool chromium);
+static NSView<BrowPage> *createPage(bool chromium);
 
 @interface WebPage : WKWebView <BrowPage, WKUIDelegate>
 @end
@@ -79,6 +81,7 @@ static char webNavigationContext;
     [self reload];
 }
 - (BOOL)loading { return self.isLoading; }
+- (BOOL)emulateViewport:(NSSize)size { return NO; }
 - (void)samplePage:(void (^)(NSImage *))completion {
     WKSnapshotConfiguration *options = [WKSnapshotConfiguration new];
     options.snapshotWidth = @48;
@@ -90,7 +93,7 @@ static char webNavigationContext;
     [self.window makeFirstResponder:self];
 }
 - (void)dispose {
-    for (NSString *key in @[@"URL", @"canGoBack", @"canGoForward"])
+    for (NSString *key in @[@"URL", @"canGoBack", @"canGoForward", @"loading"])
         [self removeObserver:self forKeyPath:key context:&webNavigationContext];
     [self stopLoading];
 }
@@ -117,12 +120,152 @@ static char webNavigationContext;
 - (BOOL)canBecomeKeyWindow { return YES; }
 @end
 
+@interface Tile : NSView
+@property NSView<BrowPage> *page;
+@property NSString *address;
+@property CFTimeInterval followed;
+@property BOOL sawLoading;
+@property CALayer *caption;
+@end
+@implementation Tile
+- (void)follow:(NSString *)address {
+    self.followed = CACurrentMediaTime();
+    self.sawLoading = NO;
+    if (!address) return;
+    self.address = address;
+    [self.page navigate:address];
+}
+- (BOOL)led {
+    NSString *now = self.page.address;
+    BOOL changed = now.length && ![now isEqual:self.address];
+    if (changed) self.address = now;
+    if (!self.followed) return changed;
+    if (self.page.loading) self.sawLoading = YES;
+    else if (self.sawLoading || changed || CACurrentMediaTime() - self.followed > 3) self.followed = 0;
+    return NO;
+}
+@end
+
+static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area, CGFloat gap, CGFloat foot, NSRect *out) {
+    double best = -1;
+    NSRect trial[count];
+    for (NSUInteger breaks = 0; breaks < 1u << (count - 1); breaks++) {
+        double ratio[count], inverse = 0, slack = 0, sum = 0;
+        NSUInteger last[count], rows = 0, start = 0;
+        for (NSUInteger i = 0; i < count; i++) {
+            sum += sizes[i].width / sizes[i].height;
+            if (i + 1 < count && !(breaks >> i & 1)) continue;
+            inverse += 1 / sum;
+            slack += (i - start) / sum;
+            ratio[rows] = sum;
+            last[rows++] = i;
+            sum = 0;
+            start = i + 1;
+        }
+        double spacing = gap * (rows - 1) + foot * rows - gap * slack;
+        double width = MIN(NSWidth(area), (NSHeight(area) - spacing) / inverse);
+        double covered = 0, y = NSMidY(area) + (width * inverse + spacing) / 2;
+        NSUInteger i = 0;
+        for (NSUInteger row = 0; row < rows; row++) {
+            double height = (width - gap * (last[row] - i)) / ratio[row], x = NSMidX(area) - width / 2;
+            for (; i <= last[row]; i++) {
+                double span = height * sizes[i].width / sizes[i].height;
+                trial[i] = NSMakeRect(round(x), round(y - height), round(x + span) - round(x),
+                                      round(y) - round(y - height));
+                covered += span * height;
+                x += span + gap;
+            }
+            y -= height + foot + gap;
+        }
+        if (width > 0 && covered > best) {
+            best = covered;
+            memcpy(out, trial, sizeof(trial));
+        }
+    }
+}
+
 @interface Surface : NSView
 @property BOOL interactive;
+@property NSArray<NSValue *> *viewports;
+@property NSArray<NSString *> *titles;
+- (void)arrange;
 @end
 @implementation Surface
 - (NSView *)hitTest:(NSPoint)point {
     return self.interactive ? [super hitTest:point] : nil;
+}
+- (void)resizeSubviewsWithOldSize:(NSSize)size {
+    [self arrange];
+}
+- (void)arrange {
+    NSArray<Tile *> *tiles = self.subviews;
+    NSUInteger count = MIN(tiles.count, self.viewports.count);
+    if (!tiles.count || NSWidth(self.bounds) < 64 || NSHeight(self.bounds) < 64) return;
+    NSSize sizes[count + 1];
+    NSRect rects[count + 1];
+    sizes[0] = self.bounds.size;
+    rects[0] = self.bounds;
+    for (NSUInteger i = 0; i < count; i++)
+        sizes[i] = self.viewports[i].sizeValue;
+    if (count) arrangeViewports(sizes, count, self.bounds, 16, 26, rects);
+    for (NSUInteger i = 0; i < MAX(count, 1); i++) {
+        Tile *tile = tiles[i];
+        NSRect inner = {NSZeroPoint, rects[i].size};
+        tile.frame = rects[i];
+        tile.bounds = inner;
+        tile.page.frame = inner;
+        if (![tile.page emulateViewport:count ? sizes[i] : NSZeroSize]) inner.size = sizes[i];
+        tile.bounds = inner;
+        tile.page.frame = inner;
+        tile.layer.cornerRadius = count ? 16 * NSWidth(inner) / NSWidth(rects[i]) : 0;
+        [self caption:tile text:count ? self.titles[i] : nil under:rects[i]];
+    }
+    [self.window invalidateShadow];
+}
+- (void)caption:(Tile *)tile text:(NSString *)text under:(NSRect)rect {
+    if (!tile.caption) {
+        tile.caption = [CALayer layer];
+        tile.caption.backgroundColor = [NSColor colorWithWhite:0 alpha:.55].CGColor;
+        tile.caption.cornerRadius = 10;
+        [tile.caption addSublayer:[CATextLayer layer]];
+        [self.layer addSublayer:tile.caption];
+    }
+    NSDictionary *style = @{NSFontAttributeName: [NSFont systemFontOfSize:11 weight:NSFontWeightMedium],
+                            NSForegroundColorAttributeName: NSColor.whiteColor};
+    NSString *shown = text ?: @"";
+    NSSize size = [shown sizeWithAttributes:style];
+    if (size.width + 16 > NSWidth(rect)) {
+        shown = [shown componentsSeparatedByString:@" · "].firstObject;
+        size = [shown sizeWithAttributes:style];
+    }
+    CATextLayer *label = (CATextLayer *)tile.caption.sublayers.firstObject;
+    CGFloat width = ceil(size.width) + 16;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    label.string = [[NSAttributedString alloc] initWithString:shown attributes:style];
+    label.contentsScale = self.window.backingScaleFactor ?: 2;
+    label.frame = CGRectMake(8, round((20 - ceil(size.height)) / 2), ceil(size.width), ceil(size.height));
+    tile.caption.frame = CGRectMake(round(NSMidX(rect) - width / 2), NSMinY(rect) - 26, width, 20);
+    tile.caption.hidden = !text || width > NSWidth(rect);
+    [CATransaction commit];
+}
+- (void)add:(NSView<BrowPage> *)page {
+    Tile *tile = [[Tile alloc] initWithFrame:self.bounds];
+    tile.wantsLayer = YES;
+    tile.layer.masksToBounds = YES;
+    tile.layer.cornerCurve = kCACornerCurveContinuous;
+    tile.page = page;
+    page.autoresizingMask = NSViewNotSizable;
+    [tile addSubview:page];
+    [self addSubview:tile];
+}
+- (void)discard:(NSUInteger)keep {
+    while (self.subviews.count > keep) {
+        Tile *tile = self.subviews.lastObject;
+        [tile.page dispose];
+        [tile.caption removeFromSuperlayer];
+        [tile removeFromSuperview];
+    }
 }
 @end
 
@@ -150,7 +293,10 @@ static char webNavigationContext;
 @property NSButton *pillAddress, *pillBack, *pillForward, *pillReload;
 @property NSPopover *toolPopover;
 @property NSButton *popoverAnchor;
+@property NSRectEdge popoverEdge;
 @property NSArray<NSTextField *> *quickFields;
+@property NSArray<NSNumber *> *viewports;
+- (void)syncViewports;
 - (void)positionPill;
 - (void)applyFields:(NSArray<NSTextField *> *)fields centre:(BOOL)centre;
 @property NSString *section;
@@ -179,6 +325,19 @@ static char webNavigationContext;
 static Browser *app;
 static void dismissPillTip(void) { if (app.tipAnchor) [app hidePillTip]; }
 static NSView<BrowPage> *page(void) { return app.pages[@(brow_current())]; }
+static Surface *surfaceOf(NSView<BrowPage> *p) { return (Surface *)p.superview.superview; }
+static NSArray<NSView<BrowPage> *> *currentPages(void) { return [surfaceOf(page()).subviews valueForKey:@"page"]; }
+static void navigate(NSString *address) {
+    for (Tile *tile in surfaceOf(page()).subviews) [tile follow:address];
+}
+static void command(SEL action) {
+    [surfaceOf(page()).subviews makeObjectsPerformSelector:@selector(follow:) withObject:nil];
+    [currentPages() makeObjectsPerformSelector:action];
+}
+static NSArray<NSArray *> *viewportPresets(void) {
+    return @[@[@"iPhone", @402, @874], @[@"iPhone Duo", @466, @678], @[@"iPhone Duo, open", @669, @951],
+             @[@"iPad", @820, @1180], @[@"Desktop", @1440, @900]];
+}
 static BOOL chromium(void) { return ![page() isKindOfClass:WebPage.class]; }
 static BOOL defaultChromium(void) { return [NSUserDefaults.standardUserDefaults boolForKey:@"chromium"]; }
 static NSString *pluginPath(void) {
@@ -230,9 +389,9 @@ static BOOL prepareQuit(void) {
     CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
         [app.window makeFirstResponder:nil];
         @autoreleasepool {
-            for (NSView<BrowPage> *p in app.pages.allValues) {
-                [p dispose];
-                [p.superview removeFromSuperview];
+            for (Surface *surface in app.deck.subviews.copy) {
+                [surface discard:0];
+                [surface removeFromSuperview];
             }
             [app.pages removeAllObjects];
         }
@@ -290,11 +449,15 @@ static NSString *selectedIcon(void) {
         if (@available(macOS 26, *)) radius = 16;
         else radius = 10;
     }
+    BOOL split = self.viewports.count > 0;
+    if (split) radius = 0;
+    CGColorRef fill = (split ? NSColor.clearColor : NSColor.windowBackgroundColor).CGColor;
     CALayer *layer = self.window.contentView.layer;
-    if (layer.cornerRadius == radius) return;
+    if (layer.cornerRadius == radius && CGColorEqualToColor(layer.backgroundColor, fill)) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     layer.cornerRadius = radius;
+    layer.backgroundColor = fill;
     [CATransaction commit];
     [self.window invalidateShadow];
 }
@@ -446,15 +609,15 @@ static NSString *selectedIcon(void) {
 }
 - (void)back:(id)sender {
     [self dismiss];
-    [page() goBack];
+    command(@selector(goBack));
 }
 - (void)forward:(id)sender {
     [self dismiss];
-    [page() goForward];
+    command(@selector(goForward));
 }
 - (void)refresh:(id)sender {
     [self dismiss];
-    [page() refresh];
+    command(@selector(refresh));
 }
 - (void)palette:(id)sender {
     if (self.pill.isKeyWindow) [self.window makeKeyWindow];
@@ -688,7 +851,7 @@ static NSString *selectedIcon(void) {
         if (sel == @selector(insertNewline:) && input.length) {
             char *destination = brow_destination(input.UTF8String);
             if (destination) {
-                [page() navigate:@(destination)];
+                navigate(@(destination));
                 brow_free(destination);
             }
         }
@@ -722,7 +885,7 @@ static NSString *selectedIcon(void) {
             char *s = brow_destination(self.field.stringValue.UTF8String);
             [self dismiss];
             if (s) {
-                [page() navigate:@(s)];
+                navigate(@(s));
                 brow_free(s);
             }
         }
@@ -732,6 +895,7 @@ static NSString *selectedIcon(void) {
 }
 #include "Preferences.inc"
 #include "WindowToolbar.inc"
+#include "Viewports.inc"
 
 @end
 
@@ -742,47 +906,45 @@ static void openLink(NSString *url, bool useChromium) {
         return;
     [app dismiss];
     if (brow_new(useChromium, false))
-        [page() navigate:url];
+        navigate(url);
 }
 static void chromiumLink(NSString *url) { openLink(url, true); }
 
-bool host_create(uint64_t ident, bool useChromium) {
-    NSView<BrowPage> *p = nil;
+static NSView<BrowPage> *createPage(bool useChromium) {
     if (useChromium) {
         if (!app.plugin)
             app.plugin = dlopen(pluginPath().fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
-        if (app.plugin) {
-            NSView<BrowPage> *(*create)(NSView *, void (*)(NSString *)) =
-                dlsym(app.plugin, "brow_chromium_page");
-            if (create)
-                p = create(app.deck, chromiumLink);
-        }
-        if (!p) {
-            NSAlert *alert = [NSAlert new];
-            alert.messageText = @"Chromium could not start";
-            alert.informativeText = @"Launch the Brow application bundle built with scripts/build-app.";
-            [alert runModal];
-            return false;
-        }
-    } else {
-        WKWebViewConfiguration *config = [WKWebViewConfiguration new];
-        NSURL *safari = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Safari"];
-        NSString *version = safari ? [NSBundle bundleWithURL:safari].infoDictionary[@"CFBundleShortVersionString"] : nil;
-        if (version.length)
-            config.applicationNameForUserAgent = [NSString stringWithFormat:@"Version/%@ Safari/605.1.15", version];
-        WebPage *wk = [[WebPage alloc] initWithFrame:app.deck.bounds configuration:config];
-        for (NSString *key in @[@"URL", @"canGoBack", @"canGoForward"])
-            [wk addObserver:wk forKeyPath:key options:0 context:&webNavigationContext];
-        wk.UIDelegate = wk;
-        wk.allowsBackForwardNavigationGestures = YES;
-        p = wk;
+        NSView<BrowPage> *(*create)(NSView *, void (*)(NSString *)) =
+            app.plugin ? dlsym(app.plugin, "brow_chromium_page") : NULL;
+        return create ? create(app.deck, chromiumLink) : nil;
+    }
+    WKWebViewConfiguration *config = [WKWebViewConfiguration new];
+    NSURL *safari = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Safari"];
+    NSString *version = safari ? [NSBundle bundleWithURL:safari].infoDictionary[@"CFBundleShortVersionString"] : nil;
+    if (version.length)
+        config.applicationNameForUserAgent = [NSString stringWithFormat:@"Version/%@ Safari/605.1.15", version];
+    WebPage *wk = [[WebPage alloc] initWithFrame:app.deck.bounds configuration:config];
+    for (NSString *key in @[@"URL", @"canGoBack", @"canGoForward", @"loading"])
+        [wk addObserver:wk forKeyPath:key options:0 context:&webNavigationContext];
+    wk.UIDelegate = wk;
+    wk.allowsBackForwardNavigationGestures = YES;
+    return wk;
+}
+
+bool host_create(uint64_t ident, bool useChromium) {
+    NSView<BrowPage> *p = createPage(useChromium);
+    if (!p) {
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"Chromium could not start";
+        alert.informativeText = @"Launch the Brow application bundle built with scripts/build-app.";
+        [alert runModal];
+        return false;
     }
     Surface *surface = [[Surface alloc] initWithFrame:app.deck.bounds];
     surface.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     surface.wantsLayer = YES;
-    p.frame = surface.bounds;
-    p.autoresizingMask = surface.autoresizingMask;
-    [surface addSubview:p];
+    [surface add:p];
+    [surface arrange];
     surface.hidden = YES;
     [app.deck addSubview:surface];
     app.pages[@(ident)] = p;
@@ -808,7 +970,8 @@ static CATransform3D depth(NSView *surface, CGFloat scale) {
 void host_present(uint64_t ident, uint64_t previous, int direction) {
     if (app.pill.isKeyWindow) [app.window makeKeyWindow];
     NSUInteger ticket = ++app.generation;
-    NSView *incoming = app.pages[@(ident)].superview, *outgoing = app.pages[@(previous)].superview;
+    [app syncViewports];
+    NSView *incoming = surfaceOf(app.pages[@(ident)]), *outgoing = surfaceOf(app.pages[@(previous)]);
     BOOL reduced = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
 #ifdef BROW_UI_TEST
     reduced |= [NSUserDefaults.standardUserDefaults boolForKey:@"TestReduceMotion"];
@@ -872,9 +1035,9 @@ void host_present(uint64_t ident, uint64_t previous, int direction) {
         });
 }
 void host_dispose(uint64_t ident) {
-    NSView<BrowPage> *p = app.pages[@(ident)];
-    [p dispose];
-    [p.superview removeFromSuperview];
+    Surface *surface = surfaceOf(app.pages[@(ident)]);
+    [surface discard:0];
+    [surface removeFromSuperview];
     [app.pages removeObjectForKey:@(ident)];
 }
 void host_close(void) { [app.window close]; }

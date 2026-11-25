@@ -165,7 +165,7 @@ static NSArray *siteGradient(NSImage *image) {
     [CATransaction setDisableActions:YES];
     self.backdrop.frame = bounds;
     self.deck.frame = NSMakeRect(round((NSWidth(bounds) - w) / 2), round((NSHeight(bounds) - h) / 2), w, h);
-    self.deck.layer.cornerRadius = NSEqualSizes(self.deck.frame.size, bounds.size) ? 0 : 24;
+    self.deck.layer.cornerRadius = NSEqualSizes(self.deck.frame.size, bounds.size) || self.viewports.count ? 0 : 24;
     self.deck.layer.cornerCurve = kCACornerCurveContinuous;
     self.deck.layer.masksToBounds = YES;
     [CATransaction commit];
@@ -266,6 +266,10 @@ static NSArray *siteGradient(NSImage *image) {
 - (void)drawPreferences {
     self.preferences.title = self.section;
     self.preferences.toolbar.selectedItemIdentifier = self.section;
+    NSRect old = self.preferences.frame;
+    NSRect sized = [self.preferences frameRectForContentRect:NSMakeRect(0, 0, 540, [self.section isEqual:@"Window"] ? 430 : 338)];
+    sized.origin = NSMakePoint(NSMinX(old), NSMaxY(old) - NSHeight(sized));
+    [self.preferences setFrame:sized display:YES];
     NSView *body = self.preferences.contentView;
     for (NSView *v in body.subviews.copy)
         [v removeFromSuperview];
@@ -354,7 +358,7 @@ static NSArray *siteGradient(NSImage *image) {
         NSString *url = page().address;
         if (brow_new(useChromium, true)) {
             if (url.length)
-                [page() navigate:url];
+                navigate(url);
         } else
             [sender selectItemAtIndex:chromium()];
     }
@@ -367,7 +371,25 @@ static NSArray *siteGradient(NSImage *image) {
     NSArray *names = @[ @"Width", @"Height", @"Left", @"Top" ];
     NSInteger values[] = {lround(NSWidth(frame)), lround(NSHeight(frame)),
                           lround(NSMinX(frame) - NSMinX(screen)), lround(NSMaxY(screen) - NSMaxY(frame))};
-    caption(geometry, @"Window frame", NSMakeRect(15, 110, 150, 22), YES);
+    caption(geometry, @"Window frame", NSMakeRect(15, 202, 150, 22), YES);
+    BOOL editable = !self.inFullScreen || self.focusMode;
+    for (NSUInteger i = 0; i < 2; i++) {
+        SizeSlider *slider = [[SizeSlider alloc] initWithFrame:NSMakeRect(16, 158 - i * 44, 450, 36) title:names[i]];
+        slider.index = i;
+        slider.minimum = i ? self.window.minSize.height : self.window.minSize.width;
+        slider.maximum = i ? NSHeight(screen) : NSWidth(screen);
+        slider.value = values[i];
+        slider.enabled = editable;
+        slider.changed = ^(double value) {
+            NSTextField *field = fields[i];
+            NSString *text = [NSString stringWithFormat:@"%.0f", value];
+            if (field.currentEditor) field.currentEditor.string = text;
+            else field.stringValue = text;
+            [app applyFields:fields centre:NO];
+        };
+        slider.released = ^{ [app positionPill]; };
+        [geometry addSubview:slider];
+    }
     for (NSUInteger i = 0; i < 4; i++) {
         CGFloat x = 16 + i * 117;
         caption(geometry, names[i], NSMakeRect(x, 85, 104, 18), NO).textColor = NSColor.secondaryLabelColor;
@@ -387,7 +409,6 @@ static NSArray *siteGradient(NSImage *image) {
     centre.frame = NSMakeRect(14, 10, 146, 30);
 
     [geometry addSubview:centre];
-    BOOL editable = !self.inFullScreen || self.focusMode;
     for (NSTextField *field in fields)
         field.enabled = editable;
     centre.enabled = editable;
@@ -398,7 +419,7 @@ static NSArray *siteGradient(NSImage *image) {
     return fields;
 }
 - (void)drawWindowOptions:(NSView *)body {
-    self.geometryFields = [self drawGeometry:groupBox(body, NSMakeRect(28, 167, 484, 146)).contentView];
+    self.geometryFields = [self drawGeometry:groupBox(body, NSMakeRect(28, 167, 484, 238)).contentView];
     NSView *focus = groupBox(body, NSMakeRect(28, 23, 484, 130)).contentView;
     caption(focus, @"Focus full screen", NSMakeRect(15, 94, 180, 22), YES);
     NSPopUpButton *style = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(13, 52, 185, 28)];
@@ -436,6 +457,11 @@ static NSArray *siteGradient(NSImage *image) {
             NSTextField *field = fields[i];
             if (!field.currentEditor) field.integerValue = values[i];
         }
+        for (SizeSlider *slider in [fields.firstObject superview].subviews) {
+            if (![slider isKindOfClass:SizeSlider.class]) continue;
+            slider.maximum = slider.index ? NSHeight(screen) : NSWidth(screen);
+            if (!slider.dragging) slider.value = values[slider.index];
+        }
     }
 }
 - (void)applyGeometry:(NSButton *)centre {
@@ -448,24 +474,31 @@ static NSArray *siteGradient(NSImage *image) {
     NSRect screen = self.window.screen.visibleFrame;
     CGFloat v[] = {NSWidth(frame), NSHeight(frame), NSMinX(frame) - NSMinX(screen),
                    NSMaxY(screen) - NSMaxY(frame)};
-    for (NSUInteger i = 0; i < MIN(fields.count, centre ? 2 : 4); i++) {
-        NSInteger number;
+    NSUInteger used = MIN(fields.count, centre ? 2 : 4);
+    NSInteger typed[4] = {0};
+    BOOL parsed[4] = {NO};
+    for (NSUInteger i = 0; i < used; i++) {
         NSTextField *field = fields[i];
         NSString *text = field.currentEditor ? field.currentEditor.string : field.stringValue;
         NSScanner *scanner = [NSScanner scannerWithString:text];
-        if ([scanner scanInteger:&number] && scanner.isAtEnd) {
-            if (i == 0 && (number < self.window.minSize.width || number > NSWidth(screen)))
-                continue;
-            if (i == 1 && (number < self.window.minSize.height || number > NSHeight(screen)))
-                continue;
-            v[i] = number;
-        }
+        if (![scanner scanInteger:&typed[i]] || !scanner.isAtEnd) continue;
+        parsed[i] = YES;
+        if (i == 0 && typed[i] < self.window.minSize.width) continue;
+        if (i == 1 && typed[i] < self.window.minSize.height) continue;
+        v[i] = i == 0 ? MIN(typed[i], NSWidth(screen)) : i == 1 ? MIN(typed[i], NSHeight(screen)) : typed[i];
     }
     CGFloat left =
         centre ? round((NSWidth(screen) - v[0]) / 2) : MIN(MAX(0, v[2]), MAX(0, NSWidth(screen) - v[0]));
     CGFloat top =
         centre ? round((NSHeight(screen) - v[1]) / 2) : MIN(MAX(0, v[3]), MAX(0, NSHeight(screen) - v[1]));
     frame = NSMakeRect(NSMinX(screen) + left, NSMaxY(screen) - top - v[1], v[0], v[1]);
+    CGFloat applied[] = {v[0], v[1], left, top};
+    for (NSUInteger i = 0; i < used; i++) {
+        if (!parsed[i] || typed[i] <= applied[i]) continue;
+        NSString *snapped = [@(lround(applied[i])) stringValue];
+        if (fields[i].currentEditor) fields[i].currentEditor.string = snapped;
+        else fields[i].stringValue = snapped;
+    }
     if (centre)
         [fields.firstObject.window makeFirstResponder:nil];
     if (self.focusMode) {

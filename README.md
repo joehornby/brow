@@ -14,13 +14,19 @@ Press **⌘L** to open the larger address and tab palette, even while the pill i
 
 ## Set the frame
 
-Brow opens centred at **1200 × 800 points**, or as large as the display allows. Click the resize icon in the floating toolbar to set the width, height, and position. Edits take effect as you type, so you can find a responsive breakpoint while the prototype is running. Press **⌥⌘C** to centre the result. Drag near the top edge, or hold **Option** and drag anywhere on the page.
+Brow opens centred at **1200 × 800 points**, or as large as the display allows. Click the resize icon in the floating toolbar to set the width, height, and position. Drag the **Width** and **Height** sliders, or click a slider to jump near a tenth of the range. You can also type a number, and a number that is larger than the screen snaps to the screen size. Edits take effect as you type, so you can find a responsive breakpoint while the prototype is running. Press **⌥⌘C** to centre the result. Drag near the top edge, or hold **Option** and drag anywhere on the page.
 
 ## Present at that size
 
 Press **⇧⌘F** for **Focus mode**. Brow gives the presentation its own full-screen Space while keeping the page centred at your chosen dimensions. A gradient drawn from the visible page slowly settles around it. For a consistent background across demos, choose a solid colour in **Settings → Window**. Press **⌘ + backslash** to hide the toolbar, and **⇧⌘F** again to return to your original window.
 
 ![The same prototype in Focus mode, centred at its original size against Brow’s page-coloured backdrop with the toolbar hidden.](assets/screenshots/focus.jpg)
+
+## Show one page in many viewports
+
+Click the devices icon in the floating toolbar and select the viewports that you want: **iPhone**, **iPhone Duo**, **iPhone Duo, open**, **iPad** or **Desktop**. Brow opens the page one time for each viewport and puts the copies in a grid. The Brow window becomes an invisible frame for the grid, and each copy looks like a separate window with its own shadow. A label below each copy gives the name and the size of its viewport. Each copy lays out at the full size of its viewport, then scales, with its content, to fit the window. The copies in a row have the same top and bottom edges, each row has the same width, and each copy keeps its aspect ratio. Resize the window to change the size of the grid.
+
+Each copy scrolls independently. When you follow a link in one copy, the other copies go to the same address. To keep the copies independent, clear **Follow links in all viewports** in the same menu. The address field, Back, Forward and Reload apply to all the copies. Clear all the selections to go back to one page that fills the window. Apple does not publish the point sizes of the iPhone Duo displays, so those two sizes are estimates from its pixel sizes.
 
 ## Compare WebKit and Chromium, tab by tab
 
@@ -63,6 +69,8 @@ Rust manages tabs and navigation. AppKit draws the window, palette, and toolbar.
 BROW_UI_TEST=1 scripts/build-app
 target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain
 target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain -TestReduceMotion YES
+target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain -TestViewports webkit
+target/ui-test/Brow.app/Contents/MacOS/Brow --use-mock-keychain -TestViewports chromium
 ```
 
 The checks use a separate app bundle and exercise page loading in both engines, keyboard navigation, interrupted tab transitions, and shutdown.
