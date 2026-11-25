@@ -35,7 +35,17 @@
     NSMutableArray<NSNumber *> *chosen = [NSMutableArray arrayWithArray:self.viewports ?: @[]];
     if (sender.state) [chosen addObject:@(sender.tag)];
     else [chosen removeObject:@(sender.tag)];
-    self.viewports = [chosen sortedArrayUsingSelector:@selector(compare:)];
+    self.viewports = chosen;
+    [self syncViewports];
+}
+- (void)moveViewport:(NSUInteger)from to:(NSUInteger)to {
+    NSMutableArray<NSNumber *> *chosen = [NSMutableArray arrayWithArray:self.viewports ?: @[]];
+    if (from < chosen.count && to < chosen.count) {
+        NSNumber *preset = chosen[from];
+        [chosen removeObjectAtIndex:from];
+        [chosen insertObject:preset atIndex:to];
+        self.viewports = chosen;
+    }
     [self syncViewports];
 }
 - (void)toggleViewportSync:(NSButton *)sender {
@@ -76,7 +86,7 @@
         tile.preset = index.integerValue;
         if (address.length) [tile follow:address];
     }
-    [surface sortSubviewsUsingFunction:presetOrder context:NULL];
+    [surface sortSubviewsUsingFunction:presetOrder context:(__bridge void *)wanted];
     self.pages[@(brow_current())] = ((Tile *)surface.subviews.firstObject).page;
     NSMutableArray<NSValue *> *sizes = [NSMutableArray array];
     NSMutableArray<NSString *> *titles = [NSMutableArray array];
