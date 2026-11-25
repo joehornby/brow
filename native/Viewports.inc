@@ -51,26 +51,45 @@
         if (leader && tile != leader && ![tile.page.address isEqual:leader.address]) [tile follow:leader.address];
 }
 - (void)syncViewports {
-    NSView<BrowPage> *primary = page();
-    Surface *surface = surfaceOf(primary);
+    Surface *surface = surfaceOf(page());
     if (!surface || self.quitting) return;
-    NSMutableArray<NSValue *> *sizes = [NSMutableArray array];
-    NSMutableArray<NSString *> *titles = [NSMutableArray array];
-    for (NSNumber *index in self.viewports) {
-        NSArray *preset = viewportPresets()[index.unsignedIntegerValue];
-        [sizes addObject:[NSValue valueWithSize:NSMakeSize([preset[1] doubleValue], [preset[2] doubleValue])]];
-        [titles addObject:[NSString stringWithFormat:@"%@ · %@ × %@", preset[0], preset[1], preset[2]]];
+    BOOL useChromium = chromium();
+    NSArray<NSNumber *> *wanted = self.viewports ?: @[];
+    NSArray<Tile *> *tiles = surface.subviews.copy;
+    Tile *kept = nil;
+    for (Tile *tile in tiles)
+        if (!kept && [wanted containsObject:@(tile.preset)]) kept = tile;
+    if (!kept) {
+        kept = tiles.firstObject;
+        kept.preset = wanted.count ? wanted.firstObject.integerValue : -1;
     }
-    [surface discard:MAX(1, sizes.count)];
-    while (surface.subviews.count < sizes.count) {
-        NSView<BrowPage> *extra = createPage(chromium());
+    for (Tile *tile in tiles)
+        if (tile != kept && ![wanted containsObject:@(tile.preset)]) [surface drop:tile];
+    if (!wanted.count) kept.preset = -1;
+    NSString *address = kept.page.address;
+    for (NSNumber *index in wanted) {
+        if ([[surface.subviews valueForKey:@"preset"] containsObject:index]) continue;
+        NSView<BrowPage> *extra = createPage(useChromium);
         if (!extra) break;
         [surface add:extra];
-        if (primary.address.length) [(Tile *)surface.subviews.lastObject follow:primary.address];
+        Tile *tile = surface.subviews.lastObject;
+        tile.preset = index.integerValue;
+        if (address.length) [tile follow:address];
+    }
+    [surface sortSubviewsUsingFunction:presetOrder context:NULL];
+    self.pages[@(brow_current())] = ((Tile *)surface.subviews.firstObject).page;
+    NSMutableArray<NSValue *> *sizes = [NSMutableArray array];
+    NSMutableArray<NSString *> *titles = [NSMutableArray array];
+    for (Tile *tile in surface.subviews) {
+        if (tile.preset < 0) continue;
+        NSArray *preset = viewportPresets()[tile.preset];
+        [sizes addObject:[NSValue valueWithSize:NSMakeSize([preset[1] doubleValue], [preset[2] doubleValue])]];
+        [titles addObject:[NSString stringWithFormat:@"%@ · %@ × %@", preset[0], preset[1], preset[2]]];
     }
     surface.viewports = sizes;
     surface.titles = titles;
     [self updateWindowCorners];
     if (self.focusMode) [self layoutFocus];
     [surface arrange];
+    [self syncPillNavigation:nil];
 }

@@ -126,6 +126,7 @@ static char webNavigationContext;
 @property CFTimeInterval followed;
 @property BOOL sawLoading;
 @property CALayer *caption;
+@property NSInteger preset;
 @end
 @implementation Tile
 - (void)follow:(NSString *)address {
@@ -139,9 +140,11 @@ static char webNavigationContext;
     NSString *now = self.page.address;
     BOOL changed = now.length && ![now isEqual:self.address];
     if (changed) self.address = now;
+    BOOL loading = self.page.loading;
+    if (!self.sawLoading && !loading && CACurrentMediaTime() - self.followed > 3) self.followed = 0;
     if (!self.followed) return changed;
-    if (self.page.loading) self.sawLoading = YES;
-    else if (self.sawLoading || changed || CACurrentMediaTime() - self.followed > 3) self.followed = 0;
+    if (loading) self.sawLoading = YES;
+    else if (self.sawLoading || changed) self.followed = 0;
     return NO;
 }
 @end
@@ -251,6 +254,7 @@ static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area,
 }
 - (void)add:(NSView<BrowPage> *)page {
     Tile *tile = [[Tile alloc] initWithFrame:self.bounds];
+    tile.preset = -1;
     tile.wantsLayer = YES;
     tile.layer.masksToBounds = YES;
     tile.layer.cornerCurve = kCACornerCurveContinuous;
@@ -259,13 +263,13 @@ static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area,
     [tile addSubview:page];
     [self addSubview:tile];
 }
+- (void)drop:(Tile *)tile {
+    [tile.page dispose];
+    [tile.caption removeFromSuperlayer];
+    [tile removeFromSuperview];
+}
 - (void)discard:(NSUInteger)keep {
-    while (self.subviews.count > keep) {
-        Tile *tile = self.subviews.lastObject;
-        [tile.page dispose];
-        [tile.caption removeFromSuperlayer];
-        [tile removeFromSuperview];
-    }
+    while (self.subviews.count > keep) [self drop:self.subviews.lastObject];
 }
 @end
 
@@ -331,8 +335,17 @@ static void navigate(NSString *address) {
     for (Tile *tile in surfaceOf(page()).subviews) [tile follow:address];
 }
 static void command(SEL action) {
-    [surfaceOf(page()).subviews makeObjectsPerformSelector:@selector(follow:) withObject:nil];
-    [currentPages() makeObjectsPerformSelector:action];
+    for (Tile *tile in surfaceOf(page()).subviews) {
+        NSView<BrowPage> *p = tile.page;
+        BOOL able = action == @selector(goBack) ? p.canGoBack : action == @selector(goForward) ? p.canGoForward : p.address.length > 0;
+        if (!able) continue;
+        [tile follow:nil];
+        [@[p] makeObjectsPerformSelector:action];
+    }
+}
+static NSComparisonResult presetOrder(__kindof NSView *a, __kindof NSView *b, void *context) {
+    (void)context;
+    return [@(((Tile *)a).preset) compare:@(((Tile *)b).preset)];
 }
 static NSArray<NSArray *> *viewportPresets(void) {
     return @[@[@"iPhone", @402, @874], @[@"iPhone Duo", @466, @678], @[@"iPhone Duo, open", @669, @951],

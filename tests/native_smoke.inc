@@ -105,10 +105,10 @@ static void viewportsTest(BOOL useChromium) {
     check(open.image!=nil && NSMaxX(open.frame)<NSWidth(app.pill.frame),"viewports button");
     NSArray<NSNumber *> *chosen=@[@0,@1,@4];
     __block int stage=0;
-    void (^choose)(void)=^{
+    void (^toggle)(NSArray<NSNumber *> *)=^(NSArray<NSNumber *> *tags) {
         [open performClick:nil];
         check(app.toolPopover.shown,"viewports popover");
-        for (NSNumber *tag in chosen)
+        for (NSNumber *tag in tags)
             [prefsButton(app.toolPopover.contentViewController.view,@selector(toggleViewport:),tag.integerValue) performClick:nil];
         check(app.toolPopover.shown,"popover stays open during selection");
         [app.toolPopover close];
@@ -157,7 +157,7 @@ static void viewportsTest(BOOL useChromium) {
         NSArray<Tile *> *tiles=surface.subviews;
         if (stage==0) {
             if (!page().pageTitle.length) return;
-            choose();
+            toggle(chosen);
             check(surface.subviews.count==3 && currentPages().count==3,"one tile for each selected viewport");
             aligned();
             NSRect screen=app.window.screen.visibleFrame;
@@ -204,7 +204,11 @@ static void viewportsTest(BOOL useChromium) {
         }
         if (stage++<10) return;
         [timer invalidate];
-        choose();
+        Tile *second=tiles[1], *third=tiles[2];
+        toggle(@[@0]);
+        check(surface.subviews.count==2 && surface.subviews[0]==second && surface.subviews[1]==third && page()==second.page,
+              "a cleared viewport leaves the other viewports and their pages in place");
+        toggle(@[@1,@4]);
         check(surface.subviews.count==1 && NSEqualRects(surface.subviews[0].frame,surface.bounds) &&
               NSEqualSizes(page().bounds.size,app.deck.bounds.size) && surface.subviews[0].layer.cornerRadius==0 &&
               ((Tile *)surface.subviews[0]).caption.hidden &&

@@ -103,7 +103,8 @@
     if (self.quitting) return;
     [self followNavigation];
     NSView<BrowPage> *current = page();
-    if (note.object && note.object != current) return;
+    NSArray<NSView<BrowPage> *> *copies = currentPages();
+    if (note.object && ![copies containsObject:note.object]) return;
     NSString *address = current.address;
     NSURL *url = address.length ? [NSURL URLWithString:address] : nil;
     NSString *label = url.host;
@@ -111,8 +112,13 @@
     if (!label.length) label = url.isFileURL ? url.lastPathComponent : nil;
     BOOL blank = !address.length || [address isEqual:@"about:blank"];
     self.pillAddress.title = label.length ? label : (blank ? @"Search or enter URL" : @"Page address");
-    self.pillBack.enabled = current.canGoBack;
-    self.pillForward.enabled = current.canGoForward;
+    BOOL back = NO, forward = NO;
+    for (NSView<BrowPage> *p in copies) {
+        back |= p.canGoBack;
+        forward |= p.canGoForward;
+    }
+    self.pillBack.enabled = back;
+    self.pillForward.enabled = forward;
     self.pillReload.enabled = !blank;
 }
 - (void)mouseEntered:(NSEvent *)event {
