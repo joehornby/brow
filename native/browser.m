@@ -24,6 +24,8 @@ extern char *brow_destination(const char *);
 static BOOL dragPageWindow(NSEvent *event);
 static BOOL prepareQuit(void);
 static void dismissPillTip(void);
+static void moveViewport(NSUInteger from, NSUInteger to);
+static BOOL reducedMotion(void);
 
 @interface BrowApplication : NSApplication <CefAppProtocol>
 @property(getter=isHandlingSendEvent) BOOL handlingSendEvent;
@@ -187,20 +189,183 @@ static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area,
     }
 }
 
+static CATransform3D shown(CALayer *layer, NSRect at) {
+    CGRect now = layer.frame;
+    CGPoint pin = layer.position;
+    CGFloat sx = NSWidth(at) / NSWidth(now), sy = NSHeight(at) / NSHeight(now);
+    CATransform3D shift = CATransform3DMakeTranslation(NSMinX(at) - pin.x - sx * (NSMinX(now) - pin.x),
+                                                       NSMinY(at) - pin.y - sy * (NSMinY(now) - pin.y), 0);
+    return CATransform3DConcat(layer.transform, CATransform3DConcat(CATransform3DMakeScale(sx, sy, 1), shift));
+}
+static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key) {
+    CASpringAnimation *a = [[CASpringAnimation alloc] initWithPerceptualDuration:.36 bounce:.14];
+    a.keyPath = path;
+    a.fromValue = from;
+    a.toValue = to;
+    a.duration = a.settlingDuration;
+    a.additive = [path isEqual:@"position"];
+    if ([key isEqual:@"lift"]) {
+        a.fillMode = kCAFillModeForwards;
+        a.removedOnCompletion = NO;
+    }
+    [layer addAnimation:a forKey:key];
+}
+
 @interface Surface : NSView
 @property BOOL interactive;
 @property NSArray<NSValue *> *viewports;
 @property NSArray<NSString *> *titles;
+@property Tile *held;
+@property BOOL lifted;
+@property NSPoint grip;
+@property NSRect home, foot;
+@property NSInteger slot;
+@property CALayer *marker;
 - (void)arrange;
+- (NSRect)handle:(Tile *)tile;
 @end
 @implementation Surface
 - (NSView *)hitTest:(NSPoint)point {
-    return self.interactive ? [super hitTest:point] : nil;
+    if (!self.interactive) return nil;
+    NSPoint local = [self convertPoint:point fromView:self.superview];
+    for (Tile *tile in self.subviews)
+        if (NSPointInRect(local, [self handle:tile])) return self;
+    return [super hitTest:point];
 }
 - (void)resizeSubviewsWithOldSize:(NSSize)size {
     [self arrange];
 }
+- (NSRect)handle:(Tile *)tile {
+    BOOL usable = self.viewports.count > 1 && tile.caption && !tile.caption.hidden;
+    CALayer *live = [tile.caption animationForKey:@"settle"] ? tile.caption.presentationLayer : nil;
+    return usable ? NSInsetRect((live ?: tile.caption).frame, -6, -3) : NSZeroRect;
+}
+- (void)resetCursorRects {
+    for (Tile *tile in self.subviews)
+        [self addCursorRect:[self handle:tile] cursor:NSCursor.openHandCursor];
+}
+- (void)mouseDown:(NSEvent *)event {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    for (Tile *tile in self.subviews)
+        if (NSPointInRect(point, [self handle:tile])) self.held = tile;
+    if (!self.held) return [super mouseDown:event];
+    self.grip = point;
+    self.slot = -1;
+    self.home = self.held.frame;
+    self.foot = self.held.caption.frame;
+}
+- (void)mouseDragged:(NSEvent *)event {
+    Tile *tile = self.held;
+    if (!tile) return [super mouseDragged:event];
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    CGFloat dx = point.x - self.grip.x, dy = point.y - self.grip.y;
+    if (!self.lifted) {
+        if (hypot(dx, dy) < 4) return;
+        self.lifted = YES;
+        for (Tile *other in self.subviews) other.layer.zPosition = other.caption.zPosition = other == tile;
+        CALayer *live = [tile.layer animationForKey:@"settle"] ? tile.layer.presentationLayer : nil;
+        CATransform3D start = (live ?: tile.layer).transform;
+        [tile.layer removeAnimationForKey:@"settle"];
+        NSRect raised = NSInsetRect(self.home, -NSWidth(self.home) * .012, -NSHeight(self.home) * .012);
+        if (!reducedMotion())
+            spring(tile.layer, @"transform", [NSValue valueWithCATransform3D:start],
+                   [NSValue valueWithCATransform3D:shown(tile.layer, raised)], @"lift");
+    }
+    [NSCursor.closedHandCursor set];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [tile setFrameOrigin:NSMakePoint(NSMinX(self.home) + dx, NSMinY(self.home) + dy)];
+    tile.caption.frame = NSOffsetRect(self.foot, dx, dy);
+    [CATransaction commit];
+    [self markSlotNear:NSMakePoint(NSMidX(self.home) + dx, NSMidY(self.home) + dy)];
+    [self.window invalidateShadow];
+}
+- (void)mouseUp:(NSEvent *)event {
+    Tile *tile = self.held;
+    if (!tile) return [super mouseUp:event];
+    if (!self.lifted) {
+        self.held = nil;
+        return;
+    }
+    NSArray<Tile *> *tiles = self.subviews.copy;
+    NSUInteger from = [tiles indexOfObjectIdenticalTo:tile];
+    NSInteger slot = self.slot;
+    NSMutableArray<NSValue *> *before = [NSMutableArray array];
+    for (Tile *each in tiles) {
+        CALayer *live = each.layer.animationKeys.count ? each.layer.presentationLayer : nil;
+        CALayer *label = [each.caption animationForKey:@"settle"] ? each.caption.presentationLayer : nil;
+        [before addObject:[NSValue valueWithRect:(live ?: each.layer).frame]];
+        [before addObject:[NSValue valueWithPoint:(label ?: each.caption).position]];
+    }
+    if (slot >= 0) moveViewport(from, slot > (NSInteger)from ? slot - 1 : slot);
+    else [self arrange];
+    [NSCursor.arrowCursor set];
+    if (reducedMotion()) return;
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{ [self.window invalidateShadow]; }];
+    for (NSUInteger i = 0; i < tiles.count; i++) {
+        CALayer *layer = tiles[i].layer, *caption = tiles[i].caption;
+        spring(layer, @"transform", [NSValue valueWithCATransform3D:shown(layer, before[i * 2].rectValue)],
+               [NSValue valueWithCATransform3D:layer.transform], @"settle");
+        NSPoint was = before[i * 2 + 1].pointValue, now = caption.position;
+        spring(caption, @"position", [NSValue valueWithPoint:NSMakePoint(was.x - now.x, was.y - now.y)],
+               [NSValue valueWithPoint:NSZeroPoint], @"settle");
+    }
+    [CATransaction commit];
+}
+- (void)markSlotNear:(NSPoint)point {
+    NSArray<Tile *> *tiles = self.subviews;
+    NSUInteger from = [tiles indexOfObjectIdenticalTo:self.held];
+    CGFloat best = CGFLOAT_MAX;
+    NSInteger slot = -1;
+    NSRect line = NSZeroRect;
+    for (NSUInteger i = 0; i < tiles.count; i++) {
+        NSRect f = i == from ? self.home : tiles[i].frame;
+        CGFloat away = MAX(0, MAX(NSMinY(f) - point.y, point.y - NSMaxY(f)));
+        for (NSUInteger side = 0; side < 2; side++) {
+            CGFloat x = side ? NSMaxX(f) + 8 : NSMinX(f) - 8, distance = hypot(point.x - x, away);
+            if (distance >= best) continue;
+            best = distance;
+            slot = i + side;
+            line = NSMakeRect(MAX(2, MIN(NSWidth(self.bounds) - 5, x - 1.5)), NSMinY(f), 3, NSHeight(f));
+        }
+    }
+    if (slot == (NSInteger)from || slot == (NSInteger)from + 1) slot = -1;
+    [self mark:slot at:line];
+}
+- (void)mark:(NSInteger)slot at:(NSRect)line {
+    if (!self.marker) {
+        CALayer *marker = self.marker = [CALayer layer];
+        marker.backgroundColor = [NSColor colorWithSRGBRed:.25 green:.62 blue:1 alpha:1].CGColor;
+        marker.cornerRadius = 1.5;
+        marker.shadowColor = NSColor.systemBlueColor.CGColor;
+        marker.shadowOffset = CGSizeZero;
+        marker.shadowRadius = 9;
+        marker.shadowOpacity = 1;
+        marker.zPosition = 2;
+        marker.opacity = 0;
+        [self.layer addSublayer:marker];
+    }
+    BOOL was = self.slot >= 0;
+    self.slot = slot;
+    [CATransaction begin];
+    [CATransaction setDisableActions:!was || reducedMotion()];
+    [CATransaction setAnimationDuration:.16];
+    if (slot >= 0) self.marker.frame = line;
+    [CATransaction commit];
+    [CATransaction begin];
+    [CATransaction setDisableActions:reducedMotion()];
+    [CATransaction setAnimationDuration:.12];
+    self.marker.opacity = slot >= 0;
+    [CATransaction commit];
+}
 - (void)arrange {
+    if (self.held) {
+        [self.held.layer removeAnimationForKey:@"lift"];
+        self.held = nil;
+        self.lifted = NO;
+        [self mark:-1 at:NSZeroRect];
+    }
     NSArray<Tile *> *tiles = self.subviews;
     NSUInteger count = MIN(tiles.count, self.viewports.count);
     if (!tiles.count || NSWidth(self.bounds) < 64 || NSHeight(self.bounds) < 64) return;
@@ -224,6 +389,7 @@ static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area,
         [self caption:tile text:count ? self.titles[i] : nil under:rects[i]];
     }
     [self.window invalidateShadow];
+    [self.window invalidateCursorRectsForView:self];
 }
 - (void)caption:(Tile *)tile text:(NSString *)text under:(NSRect)rect {
     if (!tile.caption) {
@@ -301,6 +467,7 @@ static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area,
 @property NSArray<NSTextField *> *quickFields;
 @property NSArray<NSNumber *> *viewports;
 - (void)syncViewports;
+- (void)moveViewport:(NSUInteger)from to:(NSUInteger)to;
 - (void)positionPill;
 - (void)applyFields:(NSArray<NSTextField *> *)fields centre:(BOOL)centre;
 @property NSString *section;
@@ -328,6 +495,13 @@ static void arrangeViewports(const NSSize *sizes, NSUInteger count, NSRect area,
 @end
 static Browser *app;
 static void dismissPillTip(void) { if (app.tipAnchor) [app hidePillTip]; }
+static void moveViewport(NSUInteger from, NSUInteger to) { [app moveViewport:from to:to]; }
+static BOOL reducedMotion(void) {
+#ifdef BROW_UI_TEST
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"TestReduceMotion"]) return YES;
+#endif
+    return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+}
 static NSView<BrowPage> *page(void) { return app.pages[@(brow_current())]; }
 static Surface *surfaceOf(NSView<BrowPage> *p) { return (Surface *)p.superview.superview; }
 static NSArray<NSView<BrowPage> *> *currentPages(void) { return [surfaceOf(page()).subviews valueForKey:@"page"]; }
@@ -344,8 +518,8 @@ static void command(SEL action) {
     }
 }
 static NSComparisonResult presetOrder(__kindof NSView *a, __kindof NSView *b, void *context) {
-    (void)context;
-    return [@(((Tile *)a).preset) compare:@(((Tile *)b).preset)];
+    NSArray<NSNumber *> *order = (__bridge NSArray *)context;
+    return [@([order indexOfObject:@(((Tile *)a).preset)]) compare:@([order indexOfObject:@(((Tile *)b).preset)])];
 }
 static NSArray<NSArray *> *viewportPresets(void) {
     return @[@[@"iPhone", @402, @874], @[@"iPhone Duo", @466, @678], @[@"iPhone Duo, open", @669, @951],
@@ -985,11 +1159,7 @@ void host_present(uint64_t ident, uint64_t previous, int direction) {
     NSUInteger ticket = ++app.generation;
     [app syncViewports];
     NSView *incoming = surfaceOf(app.pages[@(ident)]), *outgoing = surfaceOf(app.pages[@(previous)]);
-    BOOL reduced = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
-#ifdef BROW_UI_TEST
-    reduced |= [NSUserDefaults.standardUserDefaults boolForKey:@"TestReduceMotion"];
-#endif
-    BOOL motion = direction && outgoing && !reduced;
+    BOOL motion = direction && outgoing && !reducedMotion();
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     for (Surface *surface in app.deck.subviews) {

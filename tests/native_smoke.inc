@@ -103,7 +103,7 @@ static void viewportsTest(BOOL useChromium) {
     [page() navigate:@"data:text/html,<body%20style='background:teal'><script>c='';onclick=e=>c='%20'+e.clientX+','+e.clientY;setInterval(()=>document.title=innerWidth+'x'+innerHeight+c,50)</script>"];
     NSButton *open=prefsButton(app.pill.contentView,@selector(showViewports:),NSNotFound);
     check(open.image!=nil && NSMaxX(open.frame)<NSWidth(app.pill.frame),"viewports button");
-    NSArray<NSNumber *> *chosen=@[@0,@1,@4];
+    __block NSArray<NSNumber *> *chosen=@[@0,@1,@4];
     __block int stage=0;
     void (^toggle)(NSArray<NSNumber *> *)=^(NSArray<NSNumber *> *tags) {
         [open performClick:nil];
@@ -204,7 +204,35 @@ static void viewportsTest(BOOL useChromium) {
         }
         if (stage++<10) return;
         [timer invalidate];
-        Tile *second=tiles[1], *third=tiles[2];
+        Tile *first=tiles[0], *second=tiles[1], *third=tiles[2];
+        NSRect home=first.frame, target=second.frame;
+        check(!first.caption.hidden,"caption shows for the drag");
+        NSPoint grip=NSMakePoint(CGRectGetMidX(first.caption.frame),CGRectGetMidY(first.caption.frame));
+        CGFloat dx=NSMaxX(target)+8-NSMidX(home), dy=NSMidY(target)-NSMidY(home);
+        void (^mouse)(NSEventType,CGFloat,CGFloat)=^(NSEventType type,CGFloat x,CGFloat y) {
+            [NSApp sendEvent:[NSEvent mouseEventWithType:type
+                location:[surface convertPoint:NSMakePoint(grip.x+x,grip.y+y) toView:nil]
+                modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                context:nil eventNumber:1 clickCount:1 pressure:1]];
+        };
+        mouse(NSEventTypeLeftMouseDown,0,0);
+        mouse(NSEventTypeLeftMouseDragged,2,0);
+        check(surface.held==first && NSEqualRects(first.frame,home) && surface.marker.opacity==0,
+              "a small movement does not lift the viewport");
+        mouse(NSEventTypeLeftMouseDragged,dx,dy);
+        check(near(NSMinX(first.frame),NSMinX(home)+dx) && near(NSMinY(first.frame),NSMinY(home)+dy) &&
+              near(CGRectGetMidX(first.caption.frame),NSMidX(first.frame)),"the viewport and its caption move with the pointer");
+        check(surface.slot==2 && surface.marker.opacity==1 && NSHeight(surface.marker.frame)==NSHeight(target) &&
+              NSMinX(surface.marker.frame)>=NSMaxX(target)-6,"the marker shows where the viewport will land");
+        mouse(NSEventTypeLeftMouseUp,dx,dy);
+        chosen=@[@1,@0,@4];
+        check([app.viewports isEqual:chosen] && surface.subviews[0]==second && surface.subviews[1]==first &&
+              surface.marker.opacity==0 && !surface.held && page()==second.page,"a drop moves the viewport to the marked position");
+        check([first.page.pageTitle hasPrefix:@"402x874"],"a moved viewport keeps its page and its size");
+        aligned();
+        mouse(NSEventTypeLeftMouseDown,0,0);
+        mouse(NSEventTypeLeftMouseUp,0,0);
+        check([app.viewports isEqual:chosen],"a click on a caption does not move a viewport");
         toggle(@[@0]);
         check(surface.subviews.count==2 && surface.subviews[0]==second && surface.subviews[1]==third && page()==second.page,
               "a cleared viewport leaves the other viewports and their pages in place");
