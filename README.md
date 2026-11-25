@@ -6,6 +6,39 @@ Brow is a macOS browser for presenting interactive prototypes. Set the viewport 
 
 ![The Counterform prototype in a rounded Brow window. The floating pill below it shows Back, Forward, Reload, the page address, and window controls.](assets/screenshots/window.jpg)
 
+## Install
+
+Ask your agent to install Brow. Copy the prompt below and paste it into Claude Code or another coding agent.
+
+<details>
+<summary>Prompt to install Brow</summary>
+
+```text
+Install the Brow browser on this Mac by building it from source. Follow these steps in order, and stop and tell me if a step fails.
+
+1. Check the machine. Run `uname -m` and `sw_vers -productVersion`. Brow needs an Apple silicon Mac (arm64) and macOS 14 or later. If either check fails, stop and tell me.
+
+2. Install the Xcode command line tools. Run `xcode-select -p`. If it fails, run `xcode-select --install`, tell me to finish the installer window that opens, and wait until `xcode-select -p` succeeds. Then confirm that `clang --version`, `git --version` and `curl --version` work.
+
+3. Install Rust. Brow uses the Rust 2024 edition, so it needs Rust 1.85 or later. If `cargo --version` fails, install rustup with:
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   then run `source "$HOME/.cargo/env"`. If Rust is already installed but older than 1.85, run `rustup update stable`.
+
+4. Get the code. Clone https://github.com/joehornby/brow into ~/Developer/brow, or run `git pull` there if it already exists.
+
+5. Build the app. From the repository root, run `scripts/build-app`. The first build downloads the Chromium distribution and checks its digest, so it takes a few minutes. The script prints the path to target/Brow.app when it succeeds.
+
+6. Install the app. Quit Brow if it is running, then replace any copy in Applications:
+   rm -rf /Applications/Brow.app && ditto target/Brow.app /Applications/Brow.app
+   If /Applications is not writable without admin rights, use ~/Applications instead.
+
+7. Open it with `open /Applications/Brow.app` (or the ~/Applications path) and tell me where it was installed. The app has a local ad hoc signature. Because it was built on this Mac and not downloaded, Gatekeeper does not quarantine it.
+
+To update Brow later, repeat steps 4 to 6.
+```
+
+</details>
+
 ## Navigate from the pill
 
 The address field shows the current hostname, including the port for local demos. Click it to select the full URL. Type an address or search term and press **Return** to navigate, or **Esc** to cancel. Back, Forward, and Reload sit beside the field. The history arrows dim when there’s nowhere to go in that direction.
@@ -49,39 +82,6 @@ WebKit is the default for new tabs. You can change that default in the same pane
 | Centre the window / fill the usable screen | ⌥⌘C / ⌥⌘F |
 | Toggle Focus mode / regular full screen | ⇧⌘F / ⌃⌘F |
 | Open Settings | ⌘, |
-
-## Install with a coding agent
-
-Brow does not have a signed download yet. Until it does, you can ask a coding agent such as Claude Code to build it on your Mac. Open the section below, copy the prompt, and paste it into the agent.
-
-<details>
-<summary>Prompt to install Brow</summary>
-
-```text
-Install the Brow browser on this Mac by building it from source. Follow these steps in order, and stop and tell me if a step fails.
-
-1. Check the machine. Run `uname -m` and `sw_vers -productVersion`. Brow needs an Apple silicon Mac (arm64) and macOS 14 or later. If either check fails, stop and tell me.
-
-2. Install the Xcode command line tools. Run `xcode-select -p`. If it fails, run `xcode-select --install`, tell me to finish the installer window that opens, and wait until `xcode-select -p` succeeds. Then confirm that `clang --version`, `git --version` and `curl --version` work.
-
-3. Install Rust. Brow uses the Rust 2024 edition, so it needs Rust 1.85 or later. If `cargo --version` fails, install rustup with:
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-   then run `source "$HOME/.cargo/env"`. If Rust is already installed but older than 1.85, run `rustup update stable`.
-
-4. Get the code. Clone https://github.com/joehornby/brow into ~/Developer/brow, or run `git pull` there if it already exists.
-
-5. Build the app. From the repository root, run `scripts/build-app`. The first build downloads the Chromium distribution and checks its digest, so it takes a few minutes. The script prints the path to target/Brow.app when it succeeds.
-
-6. Install the app. Quit Brow if it is running, then replace any copy in Applications:
-   rm -rf /Applications/Brow.app && ditto target/Brow.app /Applications/Brow.app
-   If /Applications is not writable without admin rights, use ~/Applications instead.
-
-7. Open it with `open /Applications/Brow.app` (or the ~/Applications path) and tell me where it was installed. The app has a local ad hoc signature. Because it was built on this Mac and not downloaded, Gatekeeper does not quarantine it.
-
-To update Brow later, repeat steps 4 to 6.
-```
-
-</details>
 
 ## Build and run
 
