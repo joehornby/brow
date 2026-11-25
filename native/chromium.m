@@ -161,6 +161,8 @@ static bool start(void) {
 @property cef_registration_t *captureRegistration;
 @property int captureID;
 @property(copy) void (^captureReply)(NSImage *);
+@property NSSize viewport;
+@property CGFloat viewportScale;
 @end
 static cef_dev_tools_message_observer_t captureObserver;
 static NSMapTable<NSNumber *, ChromiumPage *> *capturingPages;
@@ -185,6 +187,22 @@ static void captureResult(cef_dev_tools_message_observer_t *observer, cef_browse
 
 @implementation ChromiumPage
 - (BOOL)loading { return self.browser && self.browser->is_loading(self.browser); }
+- (BOOL)emulateViewport:(NSSize)size {
+    CGFloat scale = size.width > 0 ? NSWidth(self.bounds) / size.width : 0;
+    if (!self.browser || (NSEqualSizes(size, self.viewport) && scale == self.viewportScale)) return YES;
+    self.viewport = size;
+    self.viewportScale = scale;
+    NSDictionary *command = scale
+        ? @{@"id":@0, @"method":@"Emulation.setDeviceMetricsOverride",
+            @"params":@{@"width":@(size.width), @"height":@(size.height), @"deviceScaleFactor":@0,
+                        @"mobile":@NO, @"scale":@(scale)}}
+        : @{@"id":@0, @"method":@"Emulation.clearDeviceMetricsOverride"};
+    NSData *data = [NSJSONSerialization dataWithJSONObject:command options:0 error:NULL];
+    cef_browser_host_t *host = self.browser->get_host(self.browser);
+    host->send_dev_tools_message(host, data.bytes, data.length);
+    DROP(host);
+    return YES;
+}
 - (void)samplePage:(void (^)(NSImage *))completion {
     if (!self.browser || self.captureReply || NSIsEmptyRect(self.bounds)) { completion(nil); return; }
     if (!capturingPages) {

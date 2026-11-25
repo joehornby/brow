@@ -96,6 +96,127 @@ static void focusSettingsTest(BOOL useChromium) {
     }];
     [app toggleFocus:nil];
 }
+static BOOL near(CGFloat a, CGFloat b) { return fabs(a-b)<=1; }
+static void viewportsTest(BOOL useChromium) {
+    [app dismiss];
+    if (useChromium) check(brow_new(true,true),"Chromium viewports test");
+    [page() navigate:@"data:text/html,<body%20style='background:teal'><script>c='';onclick=e=>c='%20'+e.clientX+','+e.clientY;setInterval(()=>document.title=innerWidth+'x'+innerHeight+c,50)</script>"];
+    NSButton *open=prefsButton(app.pill.contentView,@selector(showViewports:),NSNotFound);
+    check(open.image!=nil && NSMaxX(open.frame)<NSWidth(app.pill.frame),"viewports button");
+    NSArray<NSNumber *> *chosen=@[@0,@1,@4];
+    __block int stage=0;
+    void (^toggle)(NSArray<NSNumber *> *)=^(NSArray<NSNumber *> *tags) {
+        [open performClick:nil];
+        check(app.toolPopover.shown,"viewports popover");
+        for (NSNumber *tag in tags)
+            [prefsButton(app.toolPopover.contentViewController.view,@selector(toggleViewport:),tag.integerValue) performClick:nil];
+        check(app.toolPopover.shown,"popover stays open during selection");
+        [app.toolPopover close];
+    };
+    Surface *surface=surfaceOf(page());
+    void (^aligned)(void)=^{
+        NSArray<Tile *> *tiles=surface.subviews;
+        NSRect area=surface.bounds, all=NSZeroRect;
+        check(CGColorGetAlpha(app.window.contentView.layer.backgroundColor)==0 && app.window.contentView.layer.cornerRadius==0,"window is an invisible container");
+        for (Tile *tile in tiles) all=NSUnionRect(all,tile.frame);
+        NSRect block=NSMakeRect(NSMinX(all),NSMinY(all)-26,NSWidth(all),NSHeight(all)+26);
+        check(NSContainsRect(NSInsetRect(area,-1,-1),block),"tiles and captions stay in the window");
+        check((near(NSWidth(block),NSWidth(area)) || near(NSHeight(block),NSHeight(area))) &&
+              near(NSMidX(block),NSMidX(area)) && near(NSMidY(block),NSMidY(area)),"grid fills and centres");
+        for (NSUInteger i=0;i<tiles.count;i++) {
+            NSRect f=tiles[i].frame;
+            NSArray *preset=viewportPresets()[chosen[i].unsignedIntegerValue];
+            CGFloat ratio=[preset[1] doubleValue]/[preset[2] doubleValue];
+            check(fabs(NSWidth(f)/NSHeight(f)-ratio)<.02,"tile keeps the aspect ratio");
+            CALayer *caption=tiles[i].caption;
+            NSString *text=[(NSAttributedString *)((CATextLayer *)caption.sublayers.firstObject).string string];
+            check(caption.hidden || ([text hasPrefix:preset[0]] && near(CGRectGetMidX(caption.frame),NSMidX(f)) &&
+                  CGRectGetMaxY(caption.frame)<NSMinY(f)),"caption names the viewport below its tile");
+            check(fabs(NSWidth(tiles[i].page.frame)-NSWidth(tiles[i].bounds))<.01 &&
+                  fabs(NSHeight(tiles[i].page.frame)-NSHeight(tiles[i].bounds))<.01,"page fills its tile");
+            BOOL left=near(NSMinX(f),NSMinX(all)), right=near(NSMaxX(f),NSMaxX(all));
+            BOOL top=near(NSMaxY(f),NSMaxY(all)), bottom=near(NSMinY(f),NSMinY(all));
+            for (Tile *other in tiles) {
+                NSRect o=other.frame;
+                if (other==tiles[i]) continue;
+                BOOL sameRow=near(NSMinY(o),NSMinY(f));
+                check(!sameRow || near(NSHeight(o),NSHeight(f)),"row shares top and bottom edges");
+                check(!NSIntersectsRect(o,f),"tiles do not overlap");
+                left|=sameRow && near(NSMaxX(o)+16,NSMinX(f));
+                right|=sameRow && near(NSMinX(o)-16,NSMaxX(f));
+                top|=near(NSMinY(o)-42,NSMaxY(f));
+                bottom|=near(NSMaxY(o)+42,NSMinY(f));
+            }
+            check(left && right && top && bottom,"each tile edge meets the grid edge or a gap");
+        }
+    };
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:20];
+    [NSTimer scheduledTimerWithTimeInterval:.1 repeats:YES block:^(NSTimer *timer) {
+        check(deadline.timeIntervalSinceNow>0,stage==0 ? "page loads" : stage<=2 ? "each engine lays out at its viewport size"
+              : stage>=4 ? "all viewports follow a navigation in one viewport" : "a click reaches the scaled page at the correct point");
+        NSArray<Tile *> *tiles=surface.subviews;
+        if (stage==0) {
+            if (!page().pageTitle.length) return;
+            toggle(chosen);
+            check(surface.subviews.count==3 && currentPages().count==3,"one tile for each selected viewport");
+            aligned();
+            NSRect screen=app.window.screen.visibleFrame;
+            for (NSValue *size in @[[NSValue valueWithSize:NSMakeSize(520,760)],[NSValue valueWithSize:NSMakeSize(1100,420)],
+                                    [NSValue valueWithSize:NSMakeSize(1200,800)]]) {
+                [app.window setFrame:NSMakeRect(NSMinX(screen)+20,NSMinY(screen)+20,size.sizeValue.width,size.sizeValue.height) display:YES];
+                aligned();
+            }
+            stage=1;
+            return;
+        }
+        BOOL ready=YES;
+        if (stage==4) {
+            for (Tile *tile in tiles) ready&=[tile.page.address containsString:@"second"];
+            if (!ready) return;
+            stage=5;
+        }
+        for (NSUInteger i=0;i<tiles.count;i++) {
+            NSArray *preset=viewportPresets()[chosen[i].unsignedIntegerValue];
+            int w=0,h=0,x=-9,y=-9;
+            int parts=sscanf(tiles[i].page.pageTitle.UTF8String,"%dx%d %d,%d",&w,&h,&x,&y);
+            ready&=parts>=2 && w==[preset[1] intValue] && h==[preset[2] intValue];
+            if (stage==3 && i==1) ready&=parts==4 && abs(x-w/2)<=2 && abs(y-h/2)<=2;
+        }
+        if (!ready && stage!=2) return;
+        if (stage==1) {
+            [app.window makeKeyWindow];
+            stage=2;
+            return;
+        }
+        if (stage==2) {
+            NSRect f=[tiles[1] convertRect:tiles[1].bounds toView:nil];
+            for (NSNumber *type in @[@(NSEventTypeLeftMouseDown),@(NSEventTypeLeftMouseUp)])
+                [NSApp sendEvent:[NSEvent mouseEventWithType:type.integerValue location:NSMakePoint(NSMidX(f),NSMidY(f))
+                    modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:app.window.windowNumber
+                    context:nil eventNumber:1 clickCount:1 pressure:1]];
+            stage=3;
+            return;
+        }
+        if (stage==3) {
+            [tiles[1].page navigate:@"data:text/html,<body%20id=second%20style='background:coral'><script>setInterval(()=>document.title=innerWidth+'x'+innerHeight,50)</script>"];
+            stage=4;
+            return;
+        }
+        if (stage++<10) return;
+        [timer invalidate];
+        Tile *second=tiles[1], *third=tiles[2];
+        toggle(@[@0]);
+        check(surface.subviews.count==2 && surface.subviews[0]==second && surface.subviews[1]==third && page()==second.page,
+              "a cleared viewport leaves the other viewports and their pages in place");
+        toggle(@[@1,@4]);
+        check(surface.subviews.count==1 && NSEqualRects(surface.subviews[0].frame,surface.bounds) &&
+              NSEqualSizes(page().bounds.size,app.deck.bounds.size) && surface.subviews[0].layer.cornerRadius==0 &&
+              ((Tile *)surface.subviews[0]).caption.hidden &&
+              CGColorGetAlpha(app.window.contentView.layer.backgroundColor)==1 && app.window.contentView.layer.cornerRadius==24,
+              "no viewports restores the full page");
+        shortcut(@"q");
+    }];
+}
 static void smoke(void) {
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"TestToolbar"]) {
         NSRect screen = app.window.screen.visibleFrame, start = app.window.frame;
@@ -118,6 +239,16 @@ static void smoke(void) {
         check(editor != nil, "geometry popover accepts keyboard input");
         [editor insertText:@"640" replacementRange:NSMakeRange(0, editor.string.length)];
         check(NSWidth(app.window.frame) == 640 && app.toolPopover.shown, "popover resizes live");
+        [editor insertText:@"99999" replacementRange:NSMakeRange(0, editor.string.length)];
+        check(NSWidth(app.window.frame) == NSWidth(screen) && editor.string.integerValue == NSWidth(screen), "a width that is too large snaps to the screen width");
+        [editor insertText:@"640" replacementRange:NSMakeRange(0, editor.string.length)];
+        SizeSlider *slider = nil;
+        for (SizeSlider *view in app.toolPopover.contentViewController.view.subviews)
+            if ([view isKindOfClass:SizeSlider.class] && !view.index) slider = view;
+        check(slider && slider.value == 640 && slider.maximum == NSWidth(screen) && slider.minimum == app.window.minSize.width, "width slider follows the frame");
+        [slider accessibilityPerformIncrement];
+        check(NSWidth(app.window.frame) == 650 && editor.string.integerValue == 650, "slider resizes the window and updates the field");
+        [editor insertText:@"640" replacementRange:NSMakeRange(0, editor.string.length)];
         [editor doCommandBySelector:@selector(insertTab:)];
         check(app.quickFields[1].currentEditor != nil, "popover tab order");
         [app.toolPopover close];
@@ -148,6 +279,8 @@ static void smoke(void) {
     NSString *iconCase=[NSUserDefaults.standardUserDefaults stringForKey:@"TestIconCase"];
     NSString *focusCase=[NSUserDefaults.standardUserDefaults stringForKey:@"TestFocus"];
     if (focusCase) { focusSettingsTest([focusCase isEqual:@"chromium"]); return; }
+    NSString *viewportsCase=[NSUserDefaults.standardUserDefaults stringForKey:@"TestViewports"];
+    if (viewportsCase) { viewportsTest([viewportsCase isEqual:@"chromium"]); return; }
     if (iconCase) {
         if ([iconCase isEqual:@"save"]) {
             [app settings:nil];
@@ -240,7 +373,7 @@ static void verifySwitches(void) {
     check([page().pageTitle isEqual:@"Chromium autoplay"],"Chromium rendered the document and permits autoplay with sound");
     shortcut(@"1");
     check([page().pageTitle isEqual:@"WebKit test"],"WebKit document survives switching");
-    CALayer *layer=page().superview.layer;
+    CALayer *layer=surfaceOf(page()).layer;
     BOOL reduced=NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion ||
         [NSUserDefaults.standardUserDefaults boolForKey:@"TestReduceMotion"];
     check(([layer animationForKey:@"transform"]!=nil)!=reduced,"depth respects Reduce Motion");
@@ -250,7 +383,7 @@ static void verifySwitches(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
             check(brow_current()==brow_id(1),"rapid reversal ends on intended tab");
             for (NSView *v in app.deck.subviews) {
-                check(v.hidden==(v!=page().superview),"settled surface visibility");
+                check(v.hidden==(v!=surfaceOf(page())),"settled surface visibility");
                 check(!v.layer.filters.count,"settled surfaces release blur filters");
             }
             shortcut(@"l"); check(app.field.currentEditor!=nil,"Chromium palette focus");

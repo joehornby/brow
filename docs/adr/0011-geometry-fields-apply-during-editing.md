@@ -6,8 +6,10 @@ The width and height fields change the window frame while the person types. A va
 
 ## Decision
 
-`applyFields:centre:` skips a width or height that is out of range. The frame stays stable until the dimension fits. The text that the person typed is not replaced.
+`applyFields:centre:` skips a width or height that is smaller than the minimum. The frame stays stable until the dimension fits. The text that the person typed is not replaced.
+
+A number that is larger than the screen cannot become valid when the person types more digits. `applyFields:centre:` applies the screen limit and replaces the text with that limit.
 
 ## Consequences
 
-The field can show a value that is different from the window frame during editing. `syncGeometryFields` corrects the field when editing ends.
+The field can show a value that is smaller than the window frame during editing. `syncGeometryFields` corrects the field when editing ends.

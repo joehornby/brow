@@ -13,6 +13,7 @@
 - (void)refresh;
 - (void)samplePage:(void (^)(NSImage *image))completion;
 - (BOOL)loading;
+- (BOOL)emulateViewport:(NSSize)size;
 - (void)focus;
 - (void)dispose;
 @end
