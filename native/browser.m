@@ -203,6 +203,7 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
     a.fromValue = from;
     a.toValue = to;
     a.duration = a.settlingDuration;
+    a.additive = [path isEqual:@"position"];
     if ([key isEqual:@"lift"]) {
         a.fillMode = kCAFillModeForwards;
         a.removedOnCompletion = NO;
@@ -231,7 +232,8 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
 }
 - (NSRect)handle:(Tile *)tile {
     BOOL usable = self.viewports.count > 1 && tile.caption && !tile.caption.hidden;
-    return usable ? NSInsetRect(tile.caption.frame, -6, -3) : NSZeroRect;
+    CALayer *live = [tile.caption animationForKey:@"settle"] ? tile.caption.presentationLayer : nil;
+    return usable ? NSInsetRect((live ?: tile.caption).frame, -6, -3) : NSZeroRect;
 }
 - (void)resetCursorRects {
     for (Tile *tile in self.subviews)
@@ -256,11 +258,12 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
         if (hypot(dx, dy) < 4) return;
         self.lifted = YES;
         for (Tile *other in self.subviews) other.layer.zPosition = other.caption.zPosition = other == tile;
+        CALayer *live = [tile.layer animationForKey:@"settle"] ? tile.layer.presentationLayer : nil;
+        CATransform3D start = (live ?: tile.layer).transform;
         [tile.layer removeAnimationForKey:@"settle"];
-        [tile.caption removeAnimationForKey:@"settle"];
         NSRect raised = NSInsetRect(self.home, -NSWidth(self.home) * .012, -NSHeight(self.home) * .012);
         if (!reducedMotion())
-            spring(tile.layer, @"transform", [NSValue valueWithCATransform3D:tile.layer.transform],
+            spring(tile.layer, @"transform", [NSValue valueWithCATransform3D:start],
                    [NSValue valueWithCATransform3D:shown(tile.layer, raised)], @"lift");
     }
     [NSCursor.closedHandCursor set];
@@ -300,7 +303,9 @@ static void spring(CALayer *layer, NSString *path, id from, id to, NSString *key
         CALayer *layer = tiles[i].layer, *caption = tiles[i].caption;
         spring(layer, @"transform", [NSValue valueWithCATransform3D:shown(layer, before[i * 2].rectValue)],
                [NSValue valueWithCATransform3D:layer.transform], @"settle");
-        spring(caption, @"position", before[i * 2 + 1], [NSValue valueWithPoint:caption.position], @"settle");
+        NSPoint was = before[i * 2 + 1].pointValue, now = caption.position;
+        spring(caption, @"position", [NSValue valueWithPoint:NSMakePoint(was.x - now.x, was.y - now.y)],
+               [NSValue valueWithPoint:NSZeroPoint], @"settle");
     }
     [CATransaction commit];
 }
